@@ -1,0 +1,6 @@
+# Python Version
+Python 3.11.2
+
+# Packages
+pip==23.0.1
+setuptools==66.1.1

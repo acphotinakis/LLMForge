@@ -1,0 +1,112 @@
+# ============================================================
+# Research LLM - Default Configuration
+# ============================================================
+
+# ----- Data -----
+data:
+  parquet_dir: "./data/parquet"           # Directory containing .parquet files
+  text_column: "text"                      # Column name with raw text
+  train_split: 0.95                        # Fraction used for training
+  val_split: 0.05                          # Fraction used for validation
+  min_text_length: 100                     # Min characters to keep a document
+  max_text_length: 100000                  # Max characters (longer docs are chunked)
+  shuffle_seed: 42
+  num_workers: 4                           # DataLoader worker processes
+  prefetch_factor: 2
+
+# ----- Tokenizer -----
+tokenizer:
+  type: "sentencepiece"                    # "sentencepiece" | "bpe"
+  vocab_size: 32000
+  model_path: "./tokenizer/spm.model"
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+  unk_token_id: 3
+  character_coverage: 0.9995              # SentencePiece coverage
+  model_type: "bpe"                        # SentencePiece model type: bpe | unigram
+  max_sentence_length: 16384              # Max chars per sentence for training
+  num_threads: 16
+  train_on_n_docs: 2000000               # How many docs to use for vocab training
+
+# ----- Model -----
+model:
+  # Sizes: nano | small | medium | large | xl
+  preset: "small"                          # Overridden by explicit settings below if set
+  # Explicit model architecture (set to null to use preset)
+  n_layers: 12
+  n_heads: 12
+  n_kv_heads: null                         # null = same as n_heads (MHA), or set for GQA
+  d_model: 768
+  d_ff: 3072                               # Feed-forward dim (usually 4 * d_model)
+  context_length: 1024                     # Max sequence length / block size
+  vocab_size: null                         # Auto-set from tokenizer if null
+  dropout: 0.1
+  bias: false                              # Use bias in Linear layers
+  rope_base: 10000                         # RoPE theta base
+  norm_eps: 1.0e-5
+  tie_embeddings: true                     # Tie input/output embeddings
+
+# ----- Training -----
+training:
+  output_dir: "./checkpoints"
+  log_dir: "./logs"
+  run_name: "research_llm"
+
+  # Batch / sequence
+  batch_size: 8                            # Per-GPU micro-batch size
+  grad_accumulation_steps: 8              # Effective batch = batch_size * grad_accum * world_size
+  context_length: null                    # null = use model.context_length
+
+  # Optimizer
+  optimizer: "adamw"
+  learning_rate: 3.0e-4
+  min_lr: 3.0e-5                          # Min LR for cosine decay
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  eps: 1.0e-8
+
+  # Schedule
+  scheduler: "cosine_with_warmup"         # cosine_with_warmup | constant | linear
+  warmup_steps: 2000
+  max_steps: 100000                        # Total training steps
+  decay_steps: null                        # null = max_steps
+
+  # Mixed precision
+  dtype: "bfloat16"                        # float32 | float16 | bfloat16
+
+  # Checkpointing
+  save_every_n_steps: 1000
+  keep_last_n_checkpoints: 3
+  resume_from: null                        # Path to checkpoint to resume from
+
+  # Evaluation
+  eval_every_n_steps: 500
+  eval_steps: 100                          # Number of val batches per evaluation
+  generate_every_n_steps: 1000
+
+  # Logging
+  log_every_n_steps: 10
+  wandb:
+    enabled: false
+    project: "research-llm"
+    entity: null
+
+# ----- Inference / Generation -----
+inference:
+  checkpoint_path: "./checkpoints/best.pt"
+  max_new_tokens: 512
+  temperature: 0.8
+  top_k: 50
+  top_p: 0.95
+  repetition_penalty: 1.1
+  batch_size: 1
+
+# ----- System -----
+system:
+  seed: 42
+  device: "auto"                           # auto | cpu | cuda | mps
+  compile: false                           # torch.compile (PyTorch 2.0+)
+  distributed: false                       # Use torch.distributed (multi-GPU)
