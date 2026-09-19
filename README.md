@@ -52,6 +52,26 @@ Pre-tokenization is optional. It writes `train.bin` and `val.bin` alongside the 
 python main.py tokenize --config config/default.yaml
 ```
 
+The sequential tokenizer now logs per-file and per-split throughput, document counts,
+CPU time, peak memory, and time spent reading, cleaning, encoding, converting, and
+writing. It saves `tokenization_profile.json` beside the binary files, updating it
+after each completed source file. For a bounded baseline before changing the
+implementation, write to a separate ignored directory:
+
+```bash
+python scripts/tokenize_corpus.py --config config/default.yaml \
+  --output_dir outputs/tokenize_baseline --max_docs_per_file 10000 \
+  --profile_json outputs/tokenize_baseline/profile.json
+```
+
+`max_docs_per_file` covers every source shard, so it can measure future file-level
+parallelism; do not combine it with `max_tokens`. The latter applies separately to
+train and validation and stops after the document that crosses the token limit.
+Compare runs with the same input files, tokenizer, document limit, and output
+filesystem on an otherwise idle machine. Use separate output directories to keep
+both profiles and binaries. A bounded `.bin` is incomplete;
+keep it outside `data.parquet_dir` so the training loader will not use it.
+
 Check GPU activity in macOS Activity Monitor under **Window → GPU History**. The training log also prints `Device: mps` at startup. To adjust the model, batch size, learning rate, or checkpoint interval, edit `config/default.yaml` or pass `KEY=VALUE` overrides to `main.py`.
 
 ## Audit the data and tokenizer

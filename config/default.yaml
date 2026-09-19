@@ -29,6 +29,14 @@ tokenizer:
   num_threads: 16
   train_on_n_docs: 2000000               # How many docs to use for vocab training
 
+# ----- One-time corpus tokenization / benchmarking -----
+tokenization:
+  output_dir: null                         # null = data.parquet_dir; use outputs/ for a bounded benchmark
+  max_tokens: null                         # null = full split; otherwise stop after this many tokens per split
+  max_docs_per_file: null                  # null = full file; bounded benchmark across every source file
+  profile_path: null                       # null = output_dir/tokenization_profile.json
+  log_every_docs: 50000                    # Rolling throughput log interval per source file
+
 # ----- Model -----
 model:
   # Sizes: nano | small | medium | large | xl
