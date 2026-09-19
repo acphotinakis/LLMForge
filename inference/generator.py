@@ -24,10 +24,10 @@ from typing import Any, List, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 
-from ..model.transformer import GPTModel, ModelConfig
-from ..tokenizer.tokenizer import ResearchTokenizer
-from ..utils.logging_utils import get_logger
-from ..utils.device import get_device, get_dtype
+from model.transformer import GPTModel, ModelConfig
+from tokenizer.tokenizer import ResearchTokenizer
+from utils.logging_utils import get_logger
+from utils.device import get_device, get_dtype
 
 logger = get_logger(__name__)
 
@@ -43,10 +43,9 @@ class TextGenerator:
         checkpoint_path:  Path to a ``model.pt`` or checkpoint directory.
         tokenizer_path:   Path to tokenizer model file.
         model_config:     ``ModelConfig`` (required if not stored in checkpoint).
-        device_str:       ``"auto"`` / ``"cuda"`` / ``"cpu"`` / ``"mps"``.
+        device_str:       ``"mps"`` or ``"cpu"``.
         dtype_str:        ``"float32"`` / ``"float16"`` / ``"bfloat16"``.
         tokenizer_backend: ``"sentencepiece"`` or ``"hf"``.
-        compile_model:    Apply ``torch.compile`` for faster inference.
     """
 
     def __init__(
@@ -57,7 +56,6 @@ class TextGenerator:
         device_str: str = "auto",
         dtype_str: str = "bfloat16",
         tokenizer_backend: str = "sentencepiece",
-        compile_model: bool = False,
     ):
         self.device = get_device(device_str)
         self.dtype = get_dtype(dtype_str)
@@ -71,6 +69,7 @@ class TextGenerator:
         # ---- Load model ----
         if model_config is None:
             model_config = self._load_config_from_checkpoint(checkpoint_path)
+        model_config.vocab_size = self.tokenizer.vocab_size
 
         logger.info(f"Building model: {model_config.n_layers}L / d={model_config.d_model}")
         self.model = GPTModel(model_config)
@@ -78,10 +77,6 @@ class TextGenerator:
 
         self.model.eval()
         self.model.to(self.device)
-
-        if compile_model and hasattr(torch, "compile"):
-            logger.info("Compiling model with torch.compile …")
-            self.model = torch.compile(self.model)
 
         logger.info(
             f"TextGenerator ready: "

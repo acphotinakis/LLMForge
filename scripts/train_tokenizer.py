@@ -16,11 +16,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from research_llm.data.dataset import ParquetStreamIterator
-from research_llm.data.preprocessing import TextPreprocessor
-from research_llm.tokenizer.tokenizer import ResearchTokenizer
-from research_llm.utils.config import load_config, apply_overrides
-from research_llm.utils.logging_utils import setup_logging, get_logger
+from data.dataset import ParquetStreamIterator
+from data.preprocessing import TextPreprocessor
+from tokenizer.tokenizer import ResearchTokenizer
+from utils.config import load_config, apply_overrides
+from utils.logging_utils import setup_logging, get_logger
 
 logger = get_logger(__name__)
 

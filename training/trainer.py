@@ -9,7 +9,6 @@ Implements:
   - Sample text generation during training
   - Checkpoint save / resume
   - Metric logging (console + optional WandB / TensorBoard)
-  - Multi-GPU via torch.nn.parallel.DistributedDataParallel (optional)
 """
 
 from __future__ import annotations
@@ -23,9 +22,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from ..model.transformer import GPTModel
-from ..utils.checkpoint import CheckpointManager
-from ..utils.logging_utils import MetricsLogger, get_logger
+from model.transformer import GPTModel
+from utils.checkpoint import CheckpointManager
+from utils.logging_utils import MetricsLogger, get_logger
 from .scheduler import build_scheduler, get_lr, set_lr
 
 logger = get_logger(__name__)
@@ -71,7 +70,6 @@ class Trainer:
             beta1=self.tcfg.beta1,
             beta2=self.tcfg.beta2,
             eps=self.tcfg.eps,
-            device_type=device.type,
         )
 
         # ---- LR schedule ----
@@ -86,7 +84,7 @@ class Trainer:
 
         # ---- Mixed precision scaler (FP16 only — BF16 doesn't need it) ----
         self.use_amp = dtype in (torch.float16, torch.bfloat16)
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == torch.float16))
+        self.scaler = torch.amp.GradScaler(device.type, enabled=(dtype == torch.float16))
 
         # ---- Checkpoint manager ----
         self.checkpoint_manager = CheckpointManager(
@@ -303,31 +301,21 @@ class Trainer:
         total_loss = 0.0
         n = self.tcfg.grad_accumulation_steps
 
-        for micro_step in range(n):
+        for _ in range(n):
             batch = self._next_batch()
             input_ids = batch["input_ids"].to(self.device, non_blocking=True)
             labels = batch["labels"].to(self.device, non_blocking=True)
 
-            # Sync gradients only on the last micro-step
-            is_last = micro_step == n - 1
-            ctx = (
-                self.model.no_sync()
-                if hasattr(self.model, "no_sync") and not is_last
-                else _null_context()
-            )
+            with torch.autocast(
+                device_type=self.device.type,
+                dtype=self.dtype,
+                enabled=self.use_amp,
+            ):
+                _, loss = self.model(input_ids, labels=labels)
+                loss = loss / n
 
-            with ctx:
-                with torch.autocast(
-                    device_type=self.device.type,
-                    dtype=self.dtype,
-                    enabled=self.use_amp,
-                ):
-                    _, loss = self.model(input_ids, labels=labels)
-                    # Scale loss for accumulation
-                    loss = loss / n
-
-                self.scaler.scale(loss).backward()
-                total_loss += loss.item()
+            self.scaler.scale(loss).backward()
+            total_loss += loss.item()
 
         return total_loss  # already divided by n
 
@@ -366,12 +354,3 @@ class Trainer:
             return start_step
 
         return 0
-
-
-# ------------------------------------------------------------------ #
-#  Context manager helper                                             #
-# ------------------------------------------------------------------ #
-
-class _null_context:
-    def __enter__(self): return self
-    def __exit__(self, *args): pass

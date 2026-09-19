@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils.logging_utils import get_logger
+from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -73,8 +73,8 @@ class ModelConfig:
         ln = 2 * self.d_model  # two layernorms per block
         block = attn + ff + ln
         total = embed + self.n_layers * block + self.d_model  # final norm
-        if self.tie_embeddings:
-            total -= self.vocab_size * self.d_model
+        if not self.tie_embeddings:
+            total += self.vocab_size * self.d_model
         return total
 
     def to_dict(self) -> dict:
@@ -463,7 +463,6 @@ class GPTModel(nn.Module):
         beta1: float = 0.9,
         beta2: float = 0.95,
         eps: float = 1e-8,
-        device_type: str = "cuda",
     ) -> torch.optim.Optimizer:
         """
         Set up AdamW with weight decay applied only to weight matrices,
@@ -486,19 +485,11 @@ class GPTModel(nn.Module):
             {"params": no_decay_params, "weight_decay": 0.0},
         ]
 
-        # Use fused AdamW if available (faster on CUDA)
-        fused_available = "fused" in torch.optim.AdamW.__init__.__code__.co_varnames
-        use_fused = fused_available and device_type == "cuda"
-        kwargs = {"fused": True} if use_fused else {}
-        if use_fused:
-            logger.info("Using fused AdamW")
-
         optimizer = torch.optim.AdamW(
             optim_groups,
             lr=learning_rate,
             betas=(beta1, beta2),
             eps=eps,
-            **kwargs,
         )
         return optimizer
 

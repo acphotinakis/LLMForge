@@ -25,7 +25,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from .preprocessing import TextPreprocessor
-from ..utils.logging_utils import get_logger
+from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -102,11 +102,35 @@ class ParquetStreamIterator:
     def discover_files(parquet_dir: Union[str, Path]) -> List[Path]:
         """Recursively find all .parquet files under ``parquet_dir``."""
         root = Path(parquet_dir)
+        if not root.is_dir():
+            raise FileNotFoundError(f"Parquet directory does not exist: {root}")
         files = sorted(root.rglob("*.parquet"))
         if not files:
             raise FileNotFoundError(f"No .parquet files found under: {root}")
         logger.info(f"Discovered {len(files)} Parquet files in {root}")
         return files
+
+
+class ParquetTextFactory:
+    """Picklable stream factory for macOS DataLoader worker processes."""
+
+    def __init__(self, files: List[Path], text_column: str, shuffle: bool, seed: int):
+        self.files = files
+        self.text_column = text_column
+        self.shuffle = shuffle
+        self.seed = seed
+
+    def __call__(self) -> Iterator[str]:
+        worker = torch.utils.data.get_worker_info()
+        files = self.files
+        if worker is not None:
+            files = files[worker.id::worker.num_workers]
+        return iter(ParquetStreamIterator(
+            files=files,
+            text_column=self.text_column,
+            shuffle_files=self.shuffle,
+            seed=self.seed + (worker.id if worker else 0),
+        ))
 
 
 # ============================================================
@@ -213,7 +237,7 @@ class MemoryMappedDataset(Dataset):
 
     Use ``scripts/tokenize_corpus.py`` to pre-tokenise the corpus, then use
     this class for subsequent training runs.  Supports random access, so it
-    works with the standard ``RandomSampler`` / ``DistributedSampler``.
+    works with the standard ``RandomSampler``.
 
     File format: raw uint16 token IDs concatenated (no length prefix).
     """
@@ -281,7 +305,7 @@ def build_dataloaders(
             batch_size=cfg.training.batch_size,
             shuffle=True,
             num_workers=cfg.data.num_workers,
-            pin_memory=True,
+            pin_memory=False,
             prefetch_factor=cfg.data.get("prefetch_factor", 2) if cfg.data.num_workers > 0 else None,
             drop_last=True,
         )
@@ -290,7 +314,7 @@ def build_dataloaders(
             batch_size=cfg.training.batch_size,
             shuffle=False,
             num_workers=cfg.data.num_workers,
-            pin_memory=True,
+            pin_memory=False,
             drop_last=False,
         )
         return train_loader, val_loader
@@ -308,19 +332,8 @@ def build_dataloaders(
 
     logger.info(f"Train files: {len(train_files)}, Val files: {len(val_files)}")
 
-    def make_iter_factory(file_list: List[Path], shuffle: bool) -> Callable:
-        def factory():
-            stream = ParquetStreamIterator(
-                files=file_list,
-                text_column=cfg.data.text_column,
-                shuffle_files=shuffle,
-                seed=cfg.data.shuffle_seed,
-            )
-            return iter(stream)
-        return factory
-
     train_ds = TextDataset(
-        text_iter_factory=make_iter_factory(train_files, shuffle=True),
+        text_iter_factory=ParquetTextFactory(train_files, cfg.data.text_column, True, cfg.data.shuffle_seed),
         tokenizer=tokenizer,
         context_length=context_length,
         preprocessor=preprocessor,
@@ -329,7 +342,7 @@ def build_dataloaders(
         seed=cfg.data.shuffle_seed,
     )
     val_ds = TextDataset(
-        text_iter_factory=make_iter_factory(val_files, shuffle=False),
+        text_iter_factory=ParquetTextFactory(val_files, cfg.data.text_column, False, cfg.data.shuffle_seed),
         tokenizer=tokenizer,
         context_length=context_length,
         preprocessor=preprocessor,
@@ -338,29 +351,20 @@ def build_dataloaders(
         seed=cfg.data.shuffle_seed,
     )
 
-    # IterableDataset workers: each worker gets the full iterator → use worker_init_fn
-    # to slice via worker_id to avoid duplicates
-    def worker_init_fn(worker_id: int) -> None:
-        worker_info = torch.utils.data.get_worker_info()
-        if worker_info is not None:
-            dataset = worker_info.dataset
-            dataset.seed = dataset.seed + worker_id
-
-    num_workers = cfg.data.num_workers
+    num_workers = min(cfg.data.num_workers, len(train_files))
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg.training.batch_size,
         num_workers=num_workers,
-        pin_memory=True,
-        worker_init_fn=worker_init_fn if num_workers > 0 else None,
+        pin_memory=False,
         prefetch_factor=cfg.data.get("prefetch_factor", 2) if num_workers > 0 else None,
         drop_last=True,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=cfg.training.batch_size,
-        num_workers=max(1, num_workers // 2),
-        pin_memory=True,
+        num_workers=0,
+        pin_memory=False,
         drop_last=False,
     )
 

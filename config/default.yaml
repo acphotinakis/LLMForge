@@ -4,14 +4,14 @@
 
 # ----- Data -----
 data:
-  parquet_dir: "./data/parquet"           # Directory containing .parquet files
+  parquet_dir: "./data/fineweb-edu/sample/10BT"
   text_column: "text"                      # Column name with raw text
   train_split: 0.95                        # Fraction used for training
   val_split: 0.05                          # Fraction used for validation
   min_text_length: 100                     # Min characters to keep a document
   max_text_length: 100000                  # Max characters (longer docs are chunked)
   shuffle_seed: 42
-  num_workers: 4                           # DataLoader worker processes
+  num_workers: 0                           # Start with one stream on macOS
   prefetch_factor: 2
 
 # ----- Tokenizer -----
@@ -32,14 +32,14 @@ tokenizer:
 # ----- Model -----
 model:
   # Sizes: nano | small | medium | large | xl
-  preset: "small"                          # Overridden by explicit settings below if set
+  preset: "nano"
   # Explicit model architecture (set to null to use preset)
-  n_layers: 12
-  n_heads: 12
+  n_layers: null
+  n_heads: null
   n_kv_heads: null                         # null = same as n_heads (MHA), or set for GQA
-  d_model: 768
-  d_ff: 3072                               # Feed-forward dim (usually 4 * d_model)
-  context_length: 1024                     # Max sequence length / block size
+  d_model: null
+  d_ff: null
+  context_length: null
   vocab_size: null                         # Auto-set from tokenizer if null
   dropout: 0.1
   bias: false                              # Use bias in Linear layers
@@ -54,8 +54,8 @@ training:
   run_name: "research_llm"
 
   # Batch / sequence
-  batch_size: 8                            # Per-GPU micro-batch size
-  grad_accumulation_steps: 8              # Effective batch = batch_size * grad_accum * world_size
+  batch_size: 2
+  grad_accumulation_steps: 8
   context_length: null                    # null = use model.context_length
 
   # Optimizer
@@ -75,7 +75,7 @@ training:
   decay_steps: null                        # null = max_steps
 
   # Mixed precision
-  dtype: "bfloat16"                        # float32 | float16 | bfloat16
+  dtype: "float32"                         # Portable MPS starting point
 
   # Checkpointing
   save_every_n_steps: 1000
@@ -107,6 +107,4 @@ inference:
 # ----- System -----
 system:
   seed: 42
-  device: "auto"                           # auto | cpu | cuda | mps
-  compile: false                           # torch.compile (PyTorch 2.0+)
-  distributed: false                       # Use torch.distributed (multi-GPU)
+  device: "mps"                            # Apple GPU; cpu for debugging

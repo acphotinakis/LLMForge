@@ -51,16 +51,21 @@ tensorboard/
 *.ckpt
 *.safetensors
 *.bin
+*.npz
 
 # Tokenizer / generated artifacts
 tokenizer/models/
 tokenizer/output/
+tokenizer/*.model
+tokenizer/*.vocab
 
 # Data
 data/raw/
 data/processed/
 data/cache/
+data/fineweb-edu/
 *.parquet
+data.txt
 
 # Temporary files
 *.tmp
@@ -69,3 +74,6 @@ data/cache/
 
 # Local config overrides
 config/local.yaml
+
+# Standalone fine-tuning experiment outputs
+llm-output/

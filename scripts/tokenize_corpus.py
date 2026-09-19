@@ -28,27 +28,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from tqdm import tqdm
 
-from research_llm.data.dataset import ParquetStreamIterator
-from research_llm.data.preprocessing import TextPreprocessor
-from research_llm.tokenizer.tokenizer import ResearchTokenizer
-from research_llm.utils.config import load_config, resolve_model_config
-from research_llm.utils.logging_utils import setup_logging, get_logger
+from data.dataset import ParquetStreamIterator
+from data.preprocessing import TextPreprocessor
+from tokenizer.tokenizer import ResearchTokenizer
+from utils.config import load_config, resolve_model_config
+from utils.logging_utils import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Pre-tokenise Parquet corpus to binary.")
-    parser.add_argument("--config", default="config/default.yaml", help="Path to YAML config.")
-    parser.add_argument("--output_dir", default=None, help="Override output directory.")
-    parser.add_argument("--max_tokens", type=int, default=None, help="Stop after N tokens.")
-    args = parser.parse_args()
+def main(cfg=None):
+    output_override = None
+    max_tokens = None
+    if cfg is None:
+        parser = argparse.ArgumentParser(description="Pre-tokenise Parquet corpus to binary.")
+        parser.add_argument("--config", default="config/default.yaml", help="Path to YAML config.")
+        parser.add_argument("--output_dir", default=None, help="Override output directory.")
+        parser.add_argument("--max_tokens", type=int, default=None, help="Stop after N tokens.")
+        args = parser.parse_args()
+        setup_logging()
+        cfg = resolve_model_config(load_config(args.config))
+        output_override = args.output_dir
+        max_tokens = args.max_tokens
 
-    setup_logging()
-    cfg = load_config(args.config)
-    cfg = resolve_model_config(cfg)
-
-    output_dir = Path(args.output_dir or cfg.data.parquet_dir)
+    output_dir = Path(output_override or cfg.data.parquet_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load tokenizer
@@ -73,7 +76,6 @@ def main():
         out_path = output_dir / f"{split_name}.bin"
         logger.info(f"Tokenising {split_name} split ({len(split_files)} files) → {out_path}")
 
-        token_chunks = []
         total = 0
 
         stream = ParquetStreamIterator(
@@ -82,21 +84,21 @@ def main():
             shuffle_files=False,
         )
 
-        for text in tqdm(stream, desc=f"Tokenising {split_name}", unit="doc"):
-            clean = preprocessor.process(text)
-            if clean is None:
-                continue
-            ids = tokenizer.encode(clean)
-            ids.append(tokenizer.eos_token_id)
-            token_chunks.append(np.array(ids, dtype=np.uint16))
-            total += len(ids)
+        if tokenizer.vocab_size > 65536:
+            raise ValueError("uint16 token binaries require vocab_size <= 65536")
+        with out_path.open("wb") as output:
+            for text in tqdm(stream, desc=f"Tokenising {split_name}", unit="doc"):
+                clean = preprocessor.process(text)
+                if clean is None:
+                    continue
+                ids = tokenizer.encode(clean)
+                ids.append(tokenizer.eos_token_id)
+                np.asarray(ids, dtype=np.uint16).tofile(output)
+                total += len(ids)
 
-            if args.max_tokens and total >= args.max_tokens:
-                logger.info(f"Reached max_tokens={args.max_tokens}; stopping early.")
-                break
-
-        all_tokens = np.concatenate(token_chunks)
-        all_tokens.tofile(out_path)
+                if max_tokens and total >= max_tokens:
+                    logger.info(f"Reached max_tokens={max_tokens}; stopping early.")
+                    break
         logger.info(
             f"Wrote {total:,} tokens ({total * 2 / 1e9:.2f} GB) to {out_path}"
         )

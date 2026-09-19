@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, List, Optional, Union
 
-from ..utils.logging_utils import get_logger
+from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -294,7 +294,6 @@ class ResearchTokenizer:
                 # Byte fallback ensures full Unicode coverage
                 byte_fallback=True,
                 # Remove very rare tokens
-                vocab_size_threshold=0.9999,
                 input_sentence_size=max_texts,
                 shuffle_input_sentence=True,
             )

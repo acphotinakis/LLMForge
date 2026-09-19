@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import random
-from typing import Optional
 
 import numpy as np
 import torch
@@ -15,24 +13,18 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
 
 
-def get_device(device_str: str = "auto") -> torch.device:
-    """
-    Resolve a device string.
-
-    "auto" → CUDA if available, else MPS (Apple Silicon), else CPU.
-    """
+def get_device(device_str: str = "mps") -> torch.device:
+    """Use Apple's GPU by default; allow CPU for local debugging."""
     if device_str == "auto":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-    return torch.device(device_str)
+        device_str = "mps"
+    if device_str not in ("mps", "cpu"):
+        raise ValueError("system.device must be 'mps' or 'cpu'")
+    device = torch.device(device_str)
+    if device.type == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS is unavailable in this PyTorch installation or on this Mac")
+    return device
 
 
 def get_dtype(dtype_str: str) -> torch.dtype:
@@ -48,13 +40,3 @@ def get_dtype(dtype_str: str) -> torch.dtype:
     if dtype_str not in mapping:
         raise ValueError(f"Unknown dtype '{dtype_str}'. Choose from: {list(mapping)}")
     return mapping[dtype_str]
-
-
-def supports_bfloat16(device: torch.device) -> bool:
-    """Check if the device natively supports BF16."""
-    if device.type == "cuda":
-        # BF16 requires Ampere (compute capability 8.0+) or newer
-        cap = torch.cuda.get_device_capability(device)
-        return cap[0] >= 8
-    # CPU and MPS support BF16 via software path
-    return True

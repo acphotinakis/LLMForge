@@ -1,6 +1,8 @@
-# Python Version
-Python 3.11.2
-
-# Packages
-pip==23.0.1
-setuptools==66.1.1
+torch>=2.4
+numpy>=1.26
+PyYAML>=6
+pyarrow>=15
+sentencepiece>=0.2
+rich>=13
+tqdm>=4.66
+tensorboard>=2.16

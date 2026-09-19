@@ -100,7 +100,7 @@ def main():
         metavar="KEY=VALUE",
         help="Config overrides, e.g. training.batch_size=16",
     )
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()
 
     # ------------------------------------------------------------------ #
     # Bootstrap                                                            #
@@ -113,6 +113,8 @@ def main():
     cfg = load_config(args.config)
     if args.overrides:
         cfg = apply_overrides(cfg, args.overrides)
+    if cfg.system.get("backend", None) is not None:
+        raise ValueError("system.backend has been removed; use system.device=mps")
     if args.checkpoint:
         cfg["training"]["resume_from"] = args.checkpoint
 
@@ -160,15 +162,13 @@ def _run_tokenize(cfg) -> None:
     """Pre-tokenise the Parquet corpus to binary files."""
     from scripts.tokenize_corpus import main as tok_main
 
-    tok_main()
+    tok_main(cfg)
 
 
 def _run_train(cfg, device, dtype, logger) -> None:
     from tokenizer.tokenizer import ResearchTokenizer
     from data.dataset import build_dataloaders
-    from model.transformer import build_model, ModelConfig
-    from training.trainer import Trainer
-    import torch
+    from model.transformer import build_model
 
     # ---- Tokenizer ----
     tok_path = cfg.tokenizer.model_path
@@ -186,18 +186,14 @@ def _run_train(cfg, device, dtype, logger) -> None:
     logger.info("Building DataLoaders …")
     train_loader, val_loader = build_dataloaders(cfg, tokenizer)
 
+    from training.trainer import Trainer
+
     # ---- Model ----
     logger.info("Building model …")
-    model_cfg = ModelConfig.from_config(cfg)
     model = build_model(cfg, vocab_size=tokenizer.vocab_size)
     model.to(device)
-
-    # Optional: torch.compile
-    if cfg.system.get("compile", False) and hasattr(torch, "compile"):
-        logger.info("Compiling model with torch.compile …")
-        model = torch.compile(model)
-
     n_params = model.num_parameters()
+
     logger.info(f"Model parameters: {n_params:,} ({n_params/1e6:.1f}M)")
 
     # ---- Trainer ----
@@ -283,7 +279,6 @@ def _run_generate(cfg, args, device, dtype, logger) -> None:
         device_str=str(device),
         dtype_str=cfg.training.dtype,
         tokenizer_backend=cfg.tokenizer.type,
-        compile_model=cfg.system.get("compile", False),
     )
 
     inf_cfg = cfg.inference

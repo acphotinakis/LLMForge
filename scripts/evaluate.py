@@ -24,9 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 from tqdm import tqdm
 
-from research_llm.inference.generator import TextGenerator
-from research_llm.utils.config import load_config, resolve_model_config, apply_overrides
-from research_llm.utils.logging_utils import setup_logging, get_logger
+from inference.generator import TextGenerator
+from utils.config import load_config, resolve_model_config, apply_overrides
+from utils.logging_utils import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
@@ -75,7 +75,7 @@ def main():
     if args.overrides:
         cfg = apply_overrides(cfg, args.overrides)
 
-    from research_llm.model.transformer import ModelConfig
+    from model.transformer import ModelConfig
     model_cfg = ModelConfig.from_config(cfg)
     model_cfg.vocab_size = cfg.tokenizer.vocab_size
 
