@@ -54,4 +54,16 @@ python main.py tokenize --config config/default.yaml
 
 Check GPU activity in macOS Activity Monitor under **Window → GPU History**. The training log also prints `Device: mps` at startup. To adjust the model, batch size, learning rate, or checkpoint interval, edit `config/default.yaml` or pass `KEY=VALUE` overrides to `main.py`.
 
+## Audit the data and tokenizer
+
+Run the read-only audit before changing data or tokenizer settings:
+
+```bash
+python scripts/audit_data.py --config config/default.yaml
+```
+
+Open `outputs/data_audit/report.html` for four sections: exact Parquet shard inventory, sampled document lengths and filter effects, the current train/validation file split with sampled exact-duplicate checks, and a reconstruction of which shards supplied tokenizer-training documents. The folder also contains CSV tables and `summary.json`. Use `--sample-per-shard 1024 --groups-per-shard 32` for a broader sample or `--output-dir PATH` to choose another output location.
+
+Parquet row counts and sums of the dataset's `token_count` field are exact; that field does not count tokens from mini-gpt's SentencePiece tokenizer. Text lengths, quality distributions, and duplicate checks are sampled. The tokenizer provenance uses the saved SentencePiece model's candidate-document limit and the current code, seed, and data. It is not a historical input manifest. The audit does not alter training data, tokenizer, or checkpoints.
+
 Source dataset: [HuggingFaceFW/fineweb-edu sample/10BT](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu/tree/main/sample/10BT).
