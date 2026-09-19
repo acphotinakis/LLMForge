@@ -126,17 +126,18 @@ def main():
     )
     logger = get_logger("main")
     set_seed(cfg.system.seed)
-    device = get_device(cfg.system.device)
-    dtype = get_dtype(cfg.training.dtype)
-
-    logger.info(f"Mode: {args.mode}  |  Device: {device}  |  Dtype: {dtype}")
 
     # ------------------------------------------------------------------ #
     # MODE: tokenize                                                       #
     # ------------------------------------------------------------------ #
     if args.mode == "tokenize":
+        logger.info("Mode: tokenize  |  Device: cpu")
         _run_tokenize(cfg)
         return
+
+    device = get_device(cfg.system.device)
+    dtype = get_dtype(cfg.training.dtype)
+    logger.info(f"Mode: {args.mode}  |  Device: {device}  |  Dtype: {dtype}")
 
     # ------------------------------------------------------------------ #
     # MODE: train                                                          #

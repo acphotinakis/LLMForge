@@ -25,6 +25,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from .preprocessing import TextPreprocessor
+from .binary_manifest import valid_manifest
 from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -296,8 +297,8 @@ def build_dataloaders(
     train_bin = parquet_dir / "train.bin"
     val_bin = parquet_dir / "val.bin"
 
-    if train_bin.exists() and val_bin.exists():
-        logger.info("Found pre-tokenised binaries; using MemoryMappedDataset.")
+    if valid_manifest(cfg, tokenizer, parquet_dir, context_length):
+        logger.info("Verified complete pre-tokenised binaries; using MemoryMappedDataset.")
         train_ds = MemoryMappedDataset(train_bin, context_length)
         val_ds = MemoryMappedDataset(val_bin, context_length)
         train_loader = DataLoader(
@@ -318,6 +319,9 @@ def build_dataloaders(
             drop_last=False,
         )
         return train_loader, val_loader
+
+    if train_bin.exists() or val_bin.exists():
+        logger.warning("Pre-tokenised binaries lack a matching completion manifest; streaming Parquet instead.")
 
     # --- Streaming from Parquet ---
     logger.info("Streaming from Parquet files.")

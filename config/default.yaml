@@ -31,11 +31,16 @@ tokenizer:
 
 # ----- One-time corpus tokenization / benchmarking -----
 tokenization:
+  mode: "sequential"                      # sequential reference | hybrid CPU processes
   output_dir: null                         # null = data.parquet_dir; use outputs/ for a bounded benchmark
   max_tokens: null                         # null = full split; otherwise stop after this many tokens per split
   max_docs_per_file: null                  # null = full file; bounded benchmark across every source file
   profile_path: null                       # null = output_dir/tokenization_profile.json
   log_every_docs: 50000                    # Rolling throughput log interval per source file
+  workers: 4                               # Hybrid worker processes (each loads its own tokenizer)
+  chunk_docs: 1024                         # Ordered documents per validation task
+  max_pending: 8                           # Maximum submitted tasks, including running tasks
+  write_buffer_tokens: 100000              # Buffered uint16 tokens per worker flush
 
 # ----- Model -----
 model:
