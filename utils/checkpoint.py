@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,6 +58,14 @@ class CheckpointManager:
         self.save_optimizer = save_optimizer
         self._checkpoints: List[Path] = self._scan_existing()
         self._best_val_loss: float = float("inf")
+        best_meta = self.output_dir / "best_meta.json"
+        if best_meta.exists():
+            try:
+                saved_loss = json.loads(best_meta.read_text()).get("val_loss")
+                if saved_loss is not None:
+                    self._best_val_loss = float(saved_loss)
+            except (OSError, ValueError, TypeError):
+                logger.warning("Ignoring invalid best checkpoint metadata: %s", best_meta)
 
     # ------------------------------------------------------------------ #
     #  Saving                                                              #
@@ -77,28 +86,45 @@ class CheckpointManager:
         Returns the path to the checkpoint directory.
         """
         ckpt_dir = self.output_dir / f"checkpoint-step-{step:08d}"
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-        # Model weights (unwrap DDP / FSDP if necessary)
-        raw_model = _unwrap_model(model)
-        torch.save(raw_model.state_dict(), ckpt_dir / "model.pt")
-
-        # Optimizer + scheduler
-        if self.save_optimizer and optimizer is not None:
-            torch.save(optimizer.state_dict(), ckpt_dir / "optimizer.pt")
-        if scheduler is not None:
-            torch.save(scheduler.state_dict(), ckpt_dir / "scheduler.pt")
-
-        # Metadata
         meta: Dict[str, Any] = {
             "step": step,
             "val_loss": val_loss,
         }
         if extra_meta:
             meta.update(extra_meta)
-        with open(ckpt_dir / "meta.json", "w") as f:
-            json.dump(meta, f, indent=2)
 
+        # A hidden staging directory is ignored by checkpoint discovery. Move it
+        # into place only after model, optimizer, and metadata have been written.
+        stage = Path(tempfile.mkdtemp(prefix=".checkpoint-stage-", dir=self.output_dir))
+        backup = None
+        try:
+            raw_model = _unwrap_model(model)
+            torch.save(raw_model.state_dict(), stage / "model.pt")
+            if self.save_optimizer and optimizer is not None:
+                torch.save(optimizer.state_dict(), stage / "optimizer.pt")
+            if scheduler is not None:
+                torch.save(scheduler.state_dict(), stage / "scheduler.pt")
+            with open(stage / "meta.json", "w") as f:
+                json.dump(meta, f, indent=2)
+
+            # The final evaluation can save the same step again. Retain the
+            # previous complete checkpoint until its replacement is published.
+            if ckpt_dir.exists():
+                backup = Path(tempfile.mkdtemp(prefix=".checkpoint-backup-", dir=self.output_dir))
+                backup.rmdir()
+                os.replace(ckpt_dir, backup)
+            os.replace(stage, ckpt_dir)
+        except BaseException:
+            if backup is not None and backup.exists() and not ckpt_dir.exists():
+                os.replace(backup, ckpt_dir)
+            raise
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+        if backup is not None and backup.exists():
+            shutil.rmtree(backup)
+
+        self._checkpoints = [p for p in self._checkpoints if p != ckpt_dir]
         self._checkpoints.append(ckpt_dir)
         logger.info(f"Saved checkpoint → {ckpt_dir}")
 
@@ -115,13 +141,34 @@ class CheckpointManager:
     def _save_best(self, ckpt_dir: Path) -> None:
         """Copy model.pt to best.pt in the output root."""
         best_path = self.output_dir / "best.pt"
-        shutil.copy2(ckpt_dir / "model.pt", best_path)
+        best_stage = best_path.with_suffix(".pt.tmp")
+        shutil.copy2(ckpt_dir / "model.pt", best_stage)
+        os.replace(best_stage, best_path)
         # Also write best meta
         with open(ckpt_dir / "meta.json") as f:
             meta = json.load(f)
-        with open(self.output_dir / "best_meta.json", "w") as f:
+        best_meta_stage = self.output_dir / "best_meta.json.tmp"
+        with open(best_meta_stage, "w") as f:
             json.dump(meta, f, indent=2)
+        os.replace(best_meta_stage, self.output_dir / "best_meta.json")
         logger.info(f"New best checkpoint at step {meta['step']} (val_loss={meta['val_loss']:.4f})")
+
+    def save_best(self, step: int, model: torch.nn.Module, val_loss: float) -> bool:
+        """Save the exact weights just evaluated, without an optimizer checkpoint."""
+        if val_loss >= self._best_val_loss:
+            return False
+        stage = Path(tempfile.mkdtemp(prefix=".best-stage-", dir=self.output_dir))
+        try:
+            torch.save(_unwrap_model(model).state_dict(), stage / "model.pt")
+            with open(stage / "meta.json", "w") as f:
+                json.dump({"step": step, "val_loss": val_loss}, f, indent=2)
+            os.replace(stage / "model.pt", self.output_dir / "best.pt")
+            os.replace(stage / "meta.json", self.output_dir / "best_meta.json")
+        finally:
+            shutil.rmtree(stage)
+        self._best_val_loss = val_loss
+        logger.info(f"New best checkpoint at step {step} (val_loss={val_loss:.4f})")
+        return True
 
     def _prune(self) -> None:
         if self.keep_last_n <= 0:
@@ -214,7 +261,13 @@ class CheckpointManager:
     def _scan_existing(self) -> List[Path]:
         """Find and sort existing checkpoint directories."""
         ckpts = sorted(
-            [d for d in self.output_dir.iterdir() if d.is_dir() and d.name.startswith("checkpoint-step-")],
+            [d for d in self.output_dir.iterdir()
+             if d.is_dir()
+             and d.name.startswith("checkpoint-step-")
+             and d.name.removeprefix("checkpoint-step-").isdigit()
+             and (d / "meta.json").is_file()
+             and (d / "model.pt").is_file()
+             and (not self.save_optimizer or (d / "optimizer.pt").is_file())],
             key=lambda p: int(p.name.split("-")[-1]),
         )
         return ckpts

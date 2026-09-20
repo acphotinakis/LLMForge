@@ -105,8 +105,9 @@ class Trainer:
 
         # ---- State ----
         self.global_step: int = 0
-        self.best_val_loss: float = float("inf")
+        self.best_val_loss: float = self.checkpoint_manager.best_val_loss
         self._train_iter: Optional[Iterator] = None
+        self._mps_profile_active = False
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -126,10 +127,16 @@ class Trainer:
 
         self.model.train()
         self._train_iter = iter(self.train_loader)
+        profile_steps = int(self.tcfg.get("mps_profile_steps", 0))
+        if profile_steps > 0 and self.device.type == "mps":
+            torch.mps.profiler.start(mode="interval", wait_until_completed=False)
+            self._mps_profile_active = True
+            logger.info("MPS profiling enabled for %d optimizer steps", profile_steps)
 
-        accum_loss = 0.0
-        accum_tokens = 0
+        logged_losses: list[torch.Tensor] = []
         t0 = time.perf_counter()
+        last_eval_step = -1
+        last_eval_loss: Optional[float] = None
 
         for step in range(start_step, self.tcfg.max_steps):
             self.global_step = step
@@ -139,8 +146,7 @@ class Trainer:
             set_lr(self.optimizer, lr)
 
             # ---- Gradient accumulation micro-steps ----
-            loss = self._accumulate_gradients()
-            accum_loss += loss
+            logged_losses.extend(self._accumulate_gradients())
 
             # ---- Optimiser step ----
             if self.tcfg.grad_clip > 0:
@@ -154,8 +160,10 @@ class Trainer:
 
             # ---- Logging ----
             if (step + 1) % self.tcfg.log_every_n_steps == 0:
+                # One host read per logging interval also waits for queued MPS
+                # work, so the elapsed time measures completed GPU work.
+                avg_loss = torch.stack(logged_losses).sum().item() / self.tcfg.log_every_n_steps
                 dt = time.perf_counter() - t0
-                avg_loss = accum_loss / self.tcfg.log_every_n_steps
                 tokens_per_sec = (
                     self.tcfg.batch_size
                     * self.model.cfg.context_length
@@ -169,48 +177,78 @@ class Trainer:
                         "train/perplexity": math.exp(min(avg_loss, 20)),
                         "train/lr": lr,
                         "perf/tokens_per_sec": tokens_per_sec,
+                        "perf/window_seconds": dt,
                     },
                     step=step,
                 )
-                accum_loss = 0.0
+                logged_losses.clear()
                 t0 = time.perf_counter()
 
             # ---- Evaluation ----
+            step_val_loss: Optional[float] = None
             if (step + 1) % self.tcfg.eval_every_n_steps == 0:
+                eval_start = time.perf_counter()
                 val_loss = self.evaluate()
+                eval_seconds = time.perf_counter() - eval_start
+                step_val_loss = val_loss
+                last_eval_loss = val_loss
+                last_eval_step = step + 1
                 self.model.train()
                 self.metrics_logger.log(
                     {
                         "val/loss": val_loss,
                         "val/perplexity": math.exp(min(val_loss, 20)),
+                        "perf/eval_seconds": eval_seconds,
                     },
                     step=step,
                 )
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
+                    self.checkpoint_manager.save_best(
+                        step=step + 1, model=self.model, val_loss=val_loss
+                    )
 
             # ---- Sample generation ----
-            if (step + 1) % self.tcfg.generate_every_n_steps == 0:
+            if self.tcfg.generate_every_n_steps > 0 and (step + 1) % self.tcfg.generate_every_n_steps == 0:
+                self._synchronize_device()
+                generation_start = time.perf_counter()
                 self._log_sample_generation(step)
+                self._synchronize_device()
+                generation_seconds = time.perf_counter() - generation_start
                 self.model.train()
+                self.metrics_logger.log({"perf/generation_seconds": generation_seconds}, step=step)
 
             # ---- Checkpoint ----
             if (step + 1) % self.tcfg.save_every_n_steps == 0:
-                val_loss_for_ckpt = self.best_val_loss
+                self._synchronize_device()
+                checkpoint_start = time.perf_counter()
                 self.checkpoint_manager.save(
                     step=step + 1,
                     model=self.model,
                     optimizer=self.optimizer,
-                    val_loss=val_loss_for_ckpt,
+                    val_loss=step_val_loss,
                     extra_meta={
-                        "train_loss": avg_loss if "avg_loss" in dir() else None,
+                        "train_loss": avg_loss if (step + 1) % self.tcfg.log_every_n_steps == 0 else None,
                         "lr": lr,
                     },
                 )
+                self._synchronize_device()
+                self.metrics_logger.log(
+                    {"perf/checkpoint_seconds": time.perf_counter() - checkpoint_start}, step=step
+                )
+
+            if self._mps_profile_active and step - start_step + 1 >= profile_steps:
+                self.stop_mps_profile()
 
         # ---- Final eval + checkpoint ----
+        self.stop_mps_profile()
         logger.info("Training complete.  Running final evaluation …")
-        val_loss = self.evaluate()
+        val_loss = last_eval_loss if last_eval_step == self.tcfg.max_steps else self.evaluate()
+        if val_loss < self.best_val_loss:
+            self.best_val_loss = val_loss
+            self.checkpoint_manager.save_best(
+                step=self.tcfg.max_steps, model=self.model, val_loss=val_loss
+            )
         self.checkpoint_manager.save(
             step=self.tcfg.max_steps,
             model=self.model,
@@ -220,6 +258,17 @@ class Trainer:
         )
         self.metrics_logger.close()
         logger.info(f"Final val_loss={val_loss:.4f}  perplexity={math.exp(min(val_loss,20)):.2f}")
+
+    def _synchronize_device(self) -> None:
+        if self.device.type == "mps":
+            torch.mps.synchronize()
+
+    def stop_mps_profile(self) -> None:
+        """Flush optional MPS signposts, including on an interrupted run."""
+        if self._mps_profile_active:
+            torch.mps.profiler.stop()
+            self._mps_profile_active = False
+            logger.info("MPS profiling stopped")
 
     # ------------------------------------------------------------------ #
     #  Evaluation                                                          #
@@ -234,8 +283,7 @@ class Trainer:
             Mean cross-entropy loss over ``cfg.training.eval_steps`` batches.
         """
         self.model.eval()
-        total_loss = 0.0
-        count = 0
+        losses: list[torch.Tensor] = []
         val_iter = iter(self.val_loader)
         max_batches = self.tcfg.eval_steps
 
@@ -252,10 +300,9 @@ class Trainer:
             ):
                 _, loss = self.model(input_ids, labels=labels)
 
-            total_loss += loss.item()
-            count += 1
+            losses.append(loss.detach())
 
-        return total_loss / max(count, 1)
+        return torch.stack(losses).mean().item() if losses else 0.0
 
     # ------------------------------------------------------------------ #
     #  Sample generation                                                   #
@@ -291,14 +338,14 @@ class Trainer:
     #  Gradient accumulation                                               #
     # ------------------------------------------------------------------ #
 
-    def _accumulate_gradients(self) -> float:
+    def _accumulate_gradients(self) -> list[torch.Tensor]:
         """
         Run ``grad_accumulation_steps`` micro-batches and accumulate gradients.
 
         Returns:
-            Averaged loss (float) across micro-steps.
+            Detached, scaled micro-step losses for interval logging.
         """
-        total_loss = 0.0
+        losses: list[torch.Tensor] = []
         n = self.tcfg.grad_accumulation_steps
 
         for _ in range(n):
@@ -315,9 +362,9 @@ class Trainer:
                 loss = loss / n
 
             self.scaler.scale(loss).backward()
-            total_loss += loss.item()
+            losses.append(loss.detach())
 
-        return total_loss  # already divided by n
+        return losses  # each loss is already divided by n
 
     def _next_batch(self) -> Dict[str, torch.Tensor]:
         """Get the next training batch, resetting the iterator on exhaustion."""

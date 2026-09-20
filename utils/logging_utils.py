@@ -204,8 +204,12 @@ class MetricsLogger:
     def log(self, metrics: Dict[str, Any], step: int) -> None:
         """Log a dict of metrics at a given step."""
         # Console
-        parts = "  ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
-                          for k, v in metrics.items())
+        parts = "  ".join(
+            f"{k}={v:.3e}" if k.endswith("/lr") and isinstance(v, float)
+            else f"{k}={v:.4f}" if isinstance(v, float)
+            else f"{k}={v}"
+            for k, v in metrics.items()
+        )
         self._logger.info(f"[step {step}] {parts}")
 
         # TensorBoard

@@ -13,7 +13,7 @@ python -m pip install -r requirements.txt
 python -c "import torch; print(torch.backends.mps.is_available())"
 ```
 
-The last command must print `True`. Training defaults to `system.device=mps` and float32. The `nano` model and batch size 2 are conservative starting settings for Mac memory.
+The last command must print `True`. Training defaults to `system.device=mps` and float32. The `nano` model uses batch size 4 with four accumulation passes, for 16 sequences per optimizer update.
 
 ## Train
 
@@ -25,11 +25,43 @@ python main.py train --config config/default.yaml tokenizer.train_on_n_docs=1000
 
 Training streams Parquet unless a matching completed binary manifest is present.
 It writes full checkpoints to `checkpoints/checkpoint-step-*` and the best model
-weights to `checkpoints/best.pt`. Rerunning the same command resumes from the
+weights to `checkpoints/best.pt` immediately when validation improves. The
+`best_meta.json` step identifies the exact evaluated weights. Rerunning the same command resumes from the
 latest full checkpoint. You can explicitly resume a specific one with
 `--checkpoint checkpoints/checkpoint-step-XXXXXXXX`. The existing default run
 has reached step 100,000, which equals `training.max_steps`; set a larger
 `training.max_steps` to continue that run.
+
+The default validation sample remains 102,400 tokens: `50` batches at batch
+size `4` and context length `512`. To compare throughput at the same effective
+training batch and validation sample, use batch `8`, accumulation `2`, and
+`25` validation batches. Preserve your current `training.max_steps`,
+`training.decay_steps`, output directory, and run name when resuming. Start only
+one trainer at a time, after the previous one has stopped at a checkpoint.
+
+```bash
+python main.py train --config config/default.yaml \
+  system.device=mps \
+  training.output_dir=./checkpoints/resume_full_corpus \
+  training.run_name=resume_full_corpus \
+  training.max_steps=120000 training.decay_steps=100000 \
+  training.batch_size=8 training.grad_accumulation_steps=2 \
+  training.eval_steps=25
+```
+
+Compare the median `perf/tokens_per_sec` over ordinary training intervals,
+then check validation loss and macOS Memory Pressure. The logger also records
+`perf/window_seconds`, `perf/eval_seconds`, `perf/generation_seconds`, and
+`perf/checkpoint_seconds`. Generation remains enabled every 1,000 steps; if
+its measured cost is material, set `training.generate_every_n_steps=2000`
+or `0` to disable training samples while retaining validation. The interval
+throughput includes any evaluation, generation, and checkpoint work that occurs
+between log windows, so compare both ordinary intervals and total wall time.
+For a short MPS trace, set `training.mps_profile_steps=50` on a resumed run
+and record the resulting signposts in Xcode Instruments. Profiling turns off
+after 50 optimizer steps. It can show whether attention, the output projection,
+or data movement dominates; the use of scaled dot product attention alone does
+not identify the selected MPS kernel.
 
 For a short validation run in a separate output directory:
 

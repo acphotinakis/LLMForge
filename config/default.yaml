@@ -67,8 +67,8 @@ training:
   run_name: "research_llm"
 
   # Batch / sequence
-  batch_size: 2
-  grad_accumulation_steps: 8
+  batch_size: 4
+  grad_accumulation_steps: 4              # 16 sequences / 8,192 tokens per update
   context_length: null                    # null = use model.context_length
 
   # Optimizer
@@ -97,8 +97,9 @@ training:
 
   # Evaluation
   eval_every_n_steps: 500
-  eval_steps: 100                          # Number of val batches per evaluation
-  generate_every_n_steps: 1000
+  eval_steps: 50                           # 102,400 val tokens at batch 4 and context 512
+  generate_every_n_steps: 1000             # Set to 0 to disable samples during training
+  mps_profile_steps: 0                     # 0 = off; trace first N resumed steps with Instruments
 
   # Logging
   log_every_n_steps: 10
