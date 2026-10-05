@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from data.coverage_sampler import CoverageSampler
 from model.transformer import GPTModel
 from utils.checkpoint import CheckpointManager
 from utils.logging_utils import MetricsLogger, get_logger
@@ -108,6 +109,9 @@ class Trainer:
         self.best_val_loss: float = self.checkpoint_manager.best_val_loss
         self._train_iter: Optional[Iterator] = None
         self._mps_profile_active = False
+        self.coverage_sampler = train_loader.sampler if isinstance(train_loader.sampler, CoverageSampler) else None
+        self.completed_step = 0
+        self.safe_to_checkpoint = False
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -140,6 +144,7 @@ class Trainer:
 
         for step in range(start_step, self.tcfg.max_steps):
             self.global_step = step
+            self.safe_to_checkpoint = False
 
             # ---- LR update ----
             lr = self.schedule_fn(step)
@@ -157,6 +162,12 @@ class Trainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
+            if self.coverage_sampler is not None:
+                self.coverage_sampler.commit(
+                    self.tcfg.batch_size * self.tcfg.grad_accumulation_steps
+                )
+            self.completed_step = step + 1
+            self.safe_to_checkpoint = True
 
             # ---- Logging ----
             if (step + 1) % self.tcfg.log_every_n_steps == 0:
@@ -199,6 +210,7 @@ class Trainer:
                         "val/loss": val_loss,
                         "val/perplexity": math.exp(min(val_loss, 20)),
                         "perf/eval_seconds": eval_seconds,
+                        **self._coverage_metrics(),
                     },
                     step=step,
                 )
@@ -230,6 +242,7 @@ class Trainer:
                     extra_meta={
                         "train_loss": avg_loss if (step + 1) % self.tcfg.log_every_n_steps == 0 else None,
                         "lr": lr,
+                        **self._sampler_checkpoint_meta(),
                     },
                 )
                 self._synchronize_device()
@@ -254,7 +267,7 @@ class Trainer:
             model=self.model,
             optimizer=self.optimizer,
             val_loss=val_loss,
-            extra_meta={"final": True},
+            extra_meta={"final": True, **self._sampler_checkpoint_meta()},
         )
         self.metrics_logger.close()
         logger.info(f"Final val_loss={val_loss:.4f}  perplexity={math.exp(min(val_loss,20)):.2f}")
@@ -269,6 +282,32 @@ class Trainer:
             torch.mps.profiler.stop()
             self._mps_profile_active = False
             logger.info("MPS profiling stopped")
+
+    def _sampler_checkpoint_meta(self) -> dict:
+        return {"train_sampler": self.coverage_sampler.state_dict()} if self.coverage_sampler else {}
+
+    def _coverage_metrics(self) -> dict:
+        if self.coverage_sampler is None:
+            return {}
+        progress = self.coverage_sampler.progress()
+        return {
+            "data/epoch": progress["epoch"],
+            "data/blocks_seen_this_epoch": progress["blocks_seen_this_epoch"],
+            "data/epoch_coverage_pct": progress["epoch_coverage_pct"],
+        }
+
+    def save_emergency_checkpoint(self) -> bool:
+        """Save only if the model and data cursor are at a completed update."""
+        if not self.safe_to_checkpoint:
+            logger.warning("Interrupted during an update; resume from the last complete checkpoint")
+            return False
+        self.checkpoint_manager.save(
+            step=self.completed_step,
+            model=self.model,
+            optimizer=self.optimizer,
+            extra_meta={"interrupted": True, **self._sampler_checkpoint_meta()},
+        )
+        return True
 
     # ------------------------------------------------------------------ #
     #  Evaluation                                                          #
@@ -397,6 +436,20 @@ class Trainer:
                 device=self.device,
             )
             start_step = meta.get("step", 0)
+            if self.coverage_sampler is not None:
+                sampler_state = meta.get("train_sampler")
+                if sampler_state is None:
+                    logger.warning(
+                        "Checkpoint has no tracked data position; starting a new auditable "
+                        "shuffle epoch from this model/optimizer checkpoint"
+                    )
+                else:
+                    self.coverage_sampler.load_state_dict(sampler_state)
+                    logger.info("Restored training data position: %s", self.coverage_sampler.progress())
+            elif meta.get("train_sampler") is not None:
+                raise ValueError("Tracked checkpoint requires its verified train.bin and completion manifest")
+            self.completed_step = start_step
+            self.safe_to_checkpoint = True
             logger.info(f"Resumed from step {start_step}")
             return start_step
 

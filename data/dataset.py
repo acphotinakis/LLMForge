@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from .preprocessing import TextPreprocessor
 from .binary_manifest import valid_manifest
+from .coverage_sampler import CoverageSampler
 from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -299,20 +300,29 @@ def build_dataloaders(
 
     if valid_manifest(cfg, tokenizer, parquet_dir, context_length):
         logger.info("Verified complete pre-tokenised binaries; using MemoryMappedDataset.")
+        if cfg.data.num_workers != 0:
+            raise ValueError("Exact coverage requires data.num_workers=0; worker prefetch can outrun committed updates")
         train_ds = MemoryMappedDataset(train_bin, context_length)
         val_ds = MemoryMappedDataset(val_bin, context_length)
+        train_sampler = CoverageSampler(
+            bin_path=train_bin,
+            manifest_path=parquet_dir / "tokenized_manifest.json",
+            n_blocks=len(train_ds),
+            context_length=context_length,
+            order_dir=Path(cfg.training.output_dir) / "shuffle_orders",
+            seed=cfg.data.shuffle_seed,
+        )
         train_loader = DataLoader(
             train_ds,
             batch_size=cfg.training.batch_size,
-            shuffle=True,
-            num_workers=cfg.data.num_workers,
+            sampler=train_sampler,
+            num_workers=0,
             pin_memory=False,
-            prefetch_factor=cfg.data.get("prefetch_factor", 2) if cfg.data.num_workers > 0 else None,
-            drop_last=True,
+            drop_last=False,
         )
         val_loader = DataLoader(
             val_ds,
-            batch_size=cfg.training.batch_size,
+            batch_size=cfg.training.get("validation_batch_size", 4),
             shuffle=False,
             num_workers=cfg.data.num_workers,
             pin_memory=False,
@@ -366,7 +376,7 @@ def build_dataloaders(
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=cfg.training.batch_size,
+        batch_size=cfg.training.get("validation_batch_size", 4),
         num_workers=0,
         pin_memory=False,
         drop_last=False,

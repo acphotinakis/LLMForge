@@ -212,13 +212,8 @@ def _run_train(cfg, device, dtype, logger) -> None:
         trainer.train()
     except KeyboardInterrupt:
         trainer.stop_mps_profile()
-        logger.info("Training interrupted by user.  Saving emergency checkpoint …")
-        trainer.checkpoint_manager.save(
-            step=trainer.global_step,
-            model=model,
-            optimizer=trainer.optimizer,
-            extra_meta={"interrupted": True},
-        )
+        logger.info("Training interrupted by user.  Checking for a completed update …")
+        trainer.save_emergency_checkpoint()
 
 
 def _train_tokenizer(cfg) -> None:

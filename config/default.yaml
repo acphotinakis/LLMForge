@@ -97,7 +97,8 @@ training:
 
   # Evaluation
   eval_every_n_steps: 500
-  eval_steps: 50                           # 102,400 val tokens at batch 4 and context 512
+  validation_batch_size: 4                 # Fixed across training batch experiments
+  eval_steps: 50                           # 102,400 val tokens at context 512
   generate_every_n_steps: 1000             # Set to 0 to disable samples during training
   mps_profile_steps: 0                     # 0 = off; trace first N resumed steps with Instruments
 
