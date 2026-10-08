@@ -57,11 +57,13 @@ class ResearchTokenizer:
         model_path:   Path to the trained model file.
     """
 
-    def __init__(self, backend: str = "sentencepiece", model_path: Optional[str] = None):
+    def __init__(
+        self, backend: str = "sentencepiece", model_path: Optional[str] = None
+    ):
         self.backend = backend
         self.model_path = model_path
-        self._sp = None     # SentencePiece processor
-        self._hf = None     # HuggingFace tokenizer
+        self._sp = None  # SentencePiece processor
+        self._hf = None  # HuggingFace tokenizer
 
         if model_path:
             self._load(model_path)
@@ -125,11 +127,15 @@ class ResearchTokenizer:
             raise ValueError(f"Unknown backend: '{backend}'")
 
         tokenizer = cls(backend=backend, model_path=model_path)
-        logger.info(f"Tokenizer trained and saved to {model_path}  (vocab_size={tokenizer.vocab_size})")
+        logger.info(
+            f"Tokenizer trained and saved to {model_path}  (vocab_size={tokenizer.vocab_size})"
+        )
         return tokenizer
 
     @classmethod
-    def load(cls, model_path: str, backend: str = "sentencepiece") -> "ResearchTokenizer":
+    def load(
+        cls, model_path: str, backend: str = "sentencepiece"
+    ) -> "ResearchTokenizer":
         """Load an existing tokenizer model."""
         return cls(backend=backend, model_path=model_path)
 
@@ -227,7 +233,9 @@ class ResearchTokenizer:
             try:
                 import sentencepiece as spm
             except ImportError:
-                raise ImportError("sentencepiece not installed: pip install sentencepiece")
+                raise ImportError(
+                    "sentencepiece not installed: pip install sentencepiece"
+                )
             self._sp = spm.SentencePieceProcessor()
             self._sp.Load(model_path)
         elif self.backend == "hf":
@@ -259,10 +267,14 @@ class ResearchTokenizer:
         except ImportError:
             raise ImportError("sentencepiece not installed: pip install sentencepiece")
 
-        logger.info(f"Training SentencePiece tokenizer (vocab_size={vocab_size}, type={model_type}) …")
+        logger.info(
+            f"Training SentencePiece tokenizer (vocab_size={vocab_size}, type={model_type}) …"
+        )
 
         # Write texts to a temp file (SentencePiece needs a file path)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             tmp_path = f.name
             count = 0
             for text in texts:
@@ -271,7 +283,9 @@ class ResearchTokenizer:
                 # Replace newlines so each line ≈ one sentence
                 f.write(text.replace("\n", " ") + "\n")
                 count += 1
-            logger.info(f"Wrote {count:,} documents to temp file for tokenizer training.")
+            logger.info(
+                f"Wrote {count:,} documents to temp file for tokenizer training."
+            )
 
         # Model prefix = path without .model extension
         prefix = model_path[:-6] if model_path.endswith(".model") else model_path

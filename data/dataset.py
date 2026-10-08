@@ -36,6 +36,7 @@ logger = get_logger(__name__)
 # 1. Parquet streaming iterator
 # ============================================================
 
+
 class ParquetStreamIterator:
     """
     Streams text from a list of Parquet files without loading all data into RAM.
@@ -84,7 +85,9 @@ class ParquetStreamIterator:
         import pyarrow.parquet as pq
 
         pf = pq.ParquetFile(path)
-        for batch in pf.iter_batches(batch_size=self.batch_size, columns=[self.text_column]):
+        for batch in pf.iter_batches(
+            batch_size=self.batch_size, columns=[self.text_column]
+        ):
             col = batch.column(self.text_column)
             for val in col:
                 text = val.as_py()
@@ -126,18 +129,21 @@ class ParquetTextFactory:
         worker = torch.utils.data.get_worker_info()
         files = self.files
         if worker is not None:
-            files = files[worker.id::worker.num_workers]
-        return iter(ParquetStreamIterator(
-            files=files,
-            text_column=self.text_column,
-            shuffle_files=self.shuffle,
-            seed=self.seed + (worker.id if worker else 0),
-        ))
+            files = files[worker.id :: worker.num_workers]
+        return iter(
+            ParquetStreamIterator(
+                files=files,
+                text_column=self.text_column,
+                shuffle_files=self.shuffle,
+                seed=self.seed + (worker.id if worker else 0),
+            )
+        )
 
 
 # ============================================================
 # 2. Token-block IterableDataset (streaming, no RAM limit)
 # ============================================================
+
 
 class TextDataset(IterableDataset):
     """
@@ -208,9 +214,9 @@ class TextDataset(IterableDataset):
             # Drain buffer into blocks
             while len(token_buffer) >= self.context_length + 1:
                 block = token_buffer[: self.context_length + 1]
-                token_buffer = token_buffer[self.context_length:]
+                token_buffer = token_buffer[self.context_length :]
                 x = torch.tensor(block[:-1], dtype=torch.long)
-                y = torch.tensor(block[1:],  dtype=torch.long)
+                y = torch.tensor(block[1:], dtype=torch.long)
                 blocks.append((x, y))
 
                 # Yield from shuffle buffer
@@ -232,6 +238,7 @@ class TextDataset(IterableDataset):
 # ============================================================
 # 3. Memory-mapped dataset (for pre-tokenised binary files)
 # ============================================================
+
 
 class MemoryMappedDataset(Dataset):
     """
@@ -270,6 +277,7 @@ class MemoryMappedDataset(Dataset):
 # 4. Factory: build_dataloaders
 # ============================================================
 
+
 def build_dataloaders(
     cfg: Any,
     tokenizer: Any,
@@ -299,9 +307,13 @@ def build_dataloaders(
     val_bin = parquet_dir / "val.bin"
 
     if valid_manifest(cfg, tokenizer, parquet_dir, context_length):
-        logger.info("Verified complete pre-tokenised binaries; using MemoryMappedDataset.")
+        logger.info(
+            "Verified complete pre-tokenised binaries; using MemoryMappedDataset."
+        )
         if cfg.data.num_workers != 0:
-            raise ValueError("Exact coverage requires data.num_workers=0; worker prefetch can outrun committed updates")
+            raise ValueError(
+                "Exact coverage requires data.num_workers=0; worker prefetch can outrun committed updates"
+            )
         train_ds = MemoryMappedDataset(train_bin, context_length)
         val_ds = MemoryMappedDataset(val_bin, context_length)
         output_dir = (
@@ -336,7 +348,9 @@ def build_dataloaders(
         return train_loader, val_loader
 
     if train_bin.exists() or val_bin.exists():
-        logger.warning("Pre-tokenised binaries lack a matching completion manifest; streaming Parquet instead.")
+        logger.warning(
+            "Pre-tokenised binaries lack a matching completion manifest; streaming Parquet instead."
+        )
 
     # --- Streaming from Parquet ---
     logger.info("Streaming from Parquet files.")
@@ -352,7 +366,9 @@ def build_dataloaders(
     logger.info(f"Train files: {len(train_files)}, Val files: {len(val_files)}")
 
     train_ds = TextDataset(
-        text_iter_factory=ParquetTextFactory(train_files, cfg.data.text_column, True, cfg.data.shuffle_seed),
+        text_iter_factory=ParquetTextFactory(
+            train_files, cfg.data.text_column, True, cfg.data.shuffle_seed
+        ),
         tokenizer=tokenizer,
         context_length=context_length,
         preprocessor=preprocessor,
@@ -361,7 +377,9 @@ def build_dataloaders(
         seed=cfg.data.shuffle_seed,
     )
     val_ds = TextDataset(
-        text_iter_factory=ParquetTextFactory(val_files, cfg.data.text_column, False, cfg.data.shuffle_seed),
+        text_iter_factory=ParquetTextFactory(
+            val_files, cfg.data.text_column, False, cfg.data.shuffle_seed
+        ),
         tokenizer=tokenizer,
         context_length=context_length,
         preprocessor=preprocessor,

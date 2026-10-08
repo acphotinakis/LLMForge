@@ -63,7 +63,9 @@ class TextGenerator:
 
         # ---- Load tokenizer ----
         logger.info(f"Loading tokenizer from {tokenizer_path}")
-        self.tokenizer = ResearchTokenizer.load(tokenizer_path, backend=tokenizer_backend)
+        self.tokenizer = ResearchTokenizer.load(
+            tokenizer_path, backend=tokenizer_backend
+        )
         logger.info(f"Tokenizer loaded: vocab_size={self.tokenizer.vocab_size}")
 
         # ---- Load model ----
@@ -71,7 +73,9 @@ class TextGenerator:
             model_config = self._load_config_from_checkpoint(checkpoint_path)
         model_config.vocab_size = self.tokenizer.vocab_size
 
-        logger.info(f"Building model: {model_config.n_layers}L / d={model_config.d_model}")
+        logger.info(
+            f"Building model: {model_config.n_layers}L / d={model_config.d_model}"
+        )
         self.model = GPTModel(model_config)
         self._load_weights(checkpoint_path)
 
@@ -127,10 +131,15 @@ class TextGenerator:
 
         if beam_size > 1:
             outputs = self._beam_search(
-                input_tensor, max_new_tokens=max_new_tokens, beam_size=beam_size,
-                temperature=temperature, repetition_penalty=repetition_penalty,
+                input_tensor,
+                max_new_tokens=max_new_tokens,
+                beam_size=beam_size,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
             )
-            return [self.tokenizer.decode(seq, skip_special_tokens=True) for seq in outputs]
+            return [
+                self.tokenizer.decode(seq, skip_special_tokens=True) for seq in outputs
+            ]
 
         # Independent sampling
         results = []
@@ -154,7 +163,9 @@ class TextGenerator:
                     repetition_penalty=repetition_penalty,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
-            text = self.tokenizer.decode(output_ids[0].tolist(), skip_special_tokens=True)
+            text = self.tokenizer.decode(
+                output_ids[0].tolist(), skip_special_tokens=True
+            )
             results.append(text)
 
         return results
@@ -206,9 +217,11 @@ class TextGenerator:
             if len(chunk) < 2:
                 break
             x = torch.tensor([chunk[:-1]], dtype=torch.long, device=self.device)
-            y = torch.tensor([chunk[1:]],  dtype=torch.long, device=self.device)
+            y = torch.tensor([chunk[1:]], dtype=torch.long, device=self.device)
 
-            with torch.autocast(device_type=self.device.type, dtype=self.dtype, enabled=self.use_amp):
+            with torch.autocast(
+                device_type=self.device.type, dtype=self.dtype, enabled=self.use_amp
+            ):
                 _, loss = self.model(x, labels=y)
 
             total_loss += loss.item()
@@ -233,6 +246,7 @@ class TextGenerator:
     ) -> torch.Tensor:
         """Generate tokens one at a time, printing each to stdout."""
         import sys
+
         model = self.model
         eos = self.tokenizer.eos_token_id
 
@@ -260,7 +274,9 @@ class TextGenerator:
             input_ids = torch.cat([input_ids, next_tok], dim=1)
 
             # Stream the decoded token
-            token_str = self.tokenizer.decode([next_tok.item()], skip_special_tokens=False)
+            token_str = self.tokenizer.decode(
+                [next_tok.item()], skip_special_tokens=False
+            )
             sys.stdout.write(token_str)
             sys.stdout.flush()
 
@@ -304,7 +320,9 @@ class TextGenerator:
                     completed.append((score, seq))
                     continue
 
-                ctx = torch.tensor([seq[-model.cfg.context_length :]], device=self.device)
+                ctx = torch.tensor(
+                    [seq[-model.cfg.context_length :]], device=self.device
+                )
                 logits, _ = model(ctx)
                 logits = logits[0, -1, :] / max(temperature, 1e-8)
 
@@ -323,7 +341,9 @@ class TextGenerator:
                 break
 
             # Keep top beam_size candidates
-            all_candidates.sort(key=lambda x: x[0] / (len(x[1]) ** length_penalty), reverse=True)
+            all_candidates.sort(
+                key=lambda x: x[0] / (len(x[1]) ** length_penalty), reverse=True
+            )
             all_candidates = all_candidates[:beam_size]
             beam_scores = [c[0] for c in all_candidates]
             beams = [c[1] for c in all_candidates]
@@ -357,6 +377,7 @@ class TextGenerator:
     def _load_config_from_checkpoint(self, checkpoint_path: str) -> ModelConfig:
         """Try to read meta.json from a checkpoint directory."""
         import json
+
         path = Path(checkpoint_path)
         meta_candidates = [
             path / "meta.json",
@@ -378,6 +399,7 @@ class TextGenerator:
 # ------------------------------------------------------------------ #
 #  Convenience wrapper                                                #
 # ------------------------------------------------------------------ #
+
 
 def generate_text(
     prompt: str,

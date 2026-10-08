@@ -23,7 +23,9 @@ def get_device(device_str: str = "mps") -> torch.device:
         raise ValueError("system.device must be 'mps' or 'cpu'")
     device = torch.device(device_str)
     if device.type == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("MPS is unavailable in this PyTorch installation or on this Mac")
+        raise RuntimeError(
+            "MPS is unavailable in this PyTorch installation or on this Mac"
+        )
     return device
 
 

@@ -28,8 +28,13 @@ logger = get_logger(__name__)
 def main():
     parser = argparse.ArgumentParser(description="Train tokenizer vocabulary.")
     parser.add_argument("--config", default="config/default.yaml")
-    parser.add_argument("--overrides", nargs="*", default=[], metavar="KEY=VALUE",
-                        help="Override config values, e.g. tokenizer.vocab_size=64000")
+    parser.add_argument(
+        "--overrides",
+        nargs="*",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override config values, e.g. tokenizer.vocab_size=64000",
+    )
     args = parser.parse_args()
 
     setup_logging()

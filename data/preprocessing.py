@@ -37,8 +37,7 @@ class TextPreprocessor:
     _RE_MULTI_NEWLINE = re.compile(r"\n{3,}")
     _RE_TABS = re.compile(r"\t")
     _RE_URL = re.compile(
-        r"https?://[^\s\)\]\}\"\'<>]+"
-        r"|www\.[^\s\)\]\}\"\'<>]+",
+        r"https?://[^\s\)\]\}\"\'<>]+" r"|www\.[^\s\)\]\}\"\'<>]+",
         re.IGNORECASE,
     )
     _RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}")
@@ -46,7 +45,9 @@ class TextPreprocessor:
     _RE_LATEX_REF = re.compile(r"\\(?:ref|label|eqref)\{[^}]*\}")
     _RE_LATEX_CMD = re.compile(r"\\[a-zA-Z]+\*?\{[^}]*\}")
     _RE_LATEX_MATH = re.compile(r"\$+[^$]*\$+")
-    _RE_FIGURE_REF = re.compile(r"\b(?:Fig(?:ure)?|Table|Eq\.?)\s*\.?\s*\d+", re.IGNORECASE)
+    _RE_FIGURE_REF = re.compile(
+        r"\b(?:Fig(?:ure)?|Table|Eq\.?)\s*\.?\s*\d+", re.IGNORECASE
+    )
     _RE_LEADING_PUNCT = re.compile(r"^[^\w(\"\']+")
     _RE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 

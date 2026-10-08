@@ -61,28 +61,54 @@ def main() -> None:
         parser.error("--blocks must cover --batches × --batch-size")
     subset = Subset(dataset, range(n_blocks))
     generator = torch.Generator().manual_seed(cfg.data.shuffle_seed)
-    reference = DataLoader(subset, batch_size=args.batch_size, shuffle=True,
-                           num_workers=0, generator=generator)
+    reference = DataLoader(
+        subset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,
+        generator=generator,
+    )
 
     with tempfile.TemporaryDirectory(prefix="mini-gpt-sampler-benchmark-") as directory:
-        sampler = CoverageSampler(binary, manifest, n_blocks, cfg.model.context_length,
-                                  Path(directory) / "orders", cfg.data.shuffle_seed)
-        tracked = DataLoader(subset, batch_size=args.batch_size, sampler=sampler, num_workers=0)
+        sampler = CoverageSampler(
+            binary,
+            manifest,
+            n_blocks,
+            cfg.model.context_length,
+            Path(directory) / "orders",
+            cfg.data.shuffle_seed,
+        )
+        tracked = DataLoader(
+            subset, batch_size=args.batch_size, sampler=sampler, num_workers=0
+        )
         reference_result = measure(reference, args.batches, cfg.model.context_length)
         tracked_cold = measure(tracked, args.batches, cfg.model.context_length)
         # Re-open from position zero with the already generated order.
-        warm_sampler = CoverageSampler(binary, manifest, n_blocks, cfg.model.context_length,
-                                       Path(directory) / "orders", cfg.data.shuffle_seed)
-        warm = DataLoader(subset, batch_size=args.batch_size, sampler=warm_sampler, num_workers=0)
+        warm_sampler = CoverageSampler(
+            binary,
+            manifest,
+            n_blocks,
+            cfg.model.context_length,
+            Path(directory) / "orders",
+            cfg.data.shuffle_seed,
+        )
+        warm = DataLoader(
+            subset, batch_size=args.batch_size, sampler=warm_sampler, num_workers=0
+        )
         tracked_warm = measure(warm, args.batches, cfg.model.context_length)
-    print(json.dumps({
-        "blocks_in_benchmark": n_blocks,
-        "batches_measured": args.batches,
-        "batch_size": args.batch_size,
-        "standard_shuffle": reference_result,
-        "coverage_shuffle_cold": tracked_cold,
-        "coverage_shuffle_warm": tracked_warm,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "blocks_in_benchmark": n_blocks,
+                "batches_measured": args.batches,
+                "batch_size": args.batch_size,
+                "standard_shuffle": reference_result,
+                "coverage_shuffle_cold": tracked_cold,
+                "coverage_shuffle_warm": tracked_warm,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

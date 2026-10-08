@@ -32,15 +32,17 @@ logger = get_logger(__name__)
 # 1. Configuration dataclass
 # ============================================================
 
+
 @dataclass
 class ModelConfig:
     """Full specification of the Transformer architecture."""
+
     vocab_size: int = 32_000
     n_layers: int = 12
     n_heads: int = 12
-    n_kv_heads: Optional[int] = None   # None → same as n_heads (standard MHA)
+    n_kv_heads: Optional[int] = None  # None → same as n_heads (standard MHA)
     d_model: int = 768
-    d_ff: Optional[int] = None          # None → 4 * d_model
+    d_ff: Optional[int] = None  # None → 4 * d_model
     context_length: int = 1024
     dropout: float = 0.1
     bias: bool = False
@@ -56,7 +58,9 @@ class ModelConfig:
             raw = int(2 / 3 * 4 * self.d_model)
             self.d_ff = (raw + 255) // 256 * 256
         assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
-        assert self.n_heads % self.n_kv_heads == 0, "n_heads must be divisible by n_kv_heads"
+        assert (
+            self.n_heads % self.n_kv_heads == 0
+        ), "n_heads must be divisible by n_kv_heads"
 
     @property
     def head_dim(self) -> int:
@@ -104,6 +108,7 @@ class ModelConfig:
 # 2. Building blocks
 # ============================================================
 
+
 class RMSNorm(nn.Module):
     """Root Mean Square Layer Normalization (no bias, no learned mean shift)."""
 
@@ -135,14 +140,18 @@ class RotaryEmbedding(nn.Module):
         self._build_cache(max_seq_len)
 
     def _build_cache(self, seq_len: int) -> None:
-        t = torch.arange(seq_len, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+        t = torch.arange(
+            seq_len, device=self.inv_freq.device, dtype=self.inv_freq.dtype
+        )
         freqs = torch.outer(t, self.inv_freq)
         emb = torch.cat([freqs, freqs], dim=-1)
         self.register_buffer("cos_cache", emb.cos()[None, None, :, :], persistent=False)
         self.register_buffer("sin_cache", emb.sin()[None, None, :, :], persistent=False)
         self._cached_seq_len = seq_len
 
-    def forward(self, x: torch.Tensor, seq_len: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor, seq_len: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         if seq_len > self._cached_seq_len:
             self._build_cache(seq_len)
         return (
@@ -166,6 +175,7 @@ def apply_rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.T
 # 3. Attention (with GQA + RoPE)
 # ============================================================
 
+
 class CausalSelfAttention(nn.Module):
     """
     Multi-head (or Grouped-Query) causal self-attention with RoPE.
@@ -180,19 +190,25 @@ class CausalSelfAttention(nn.Module):
         self.n_kv_heads = cfg.n_kv_heads
         self.head_dim = cfg.head_dim
         self.n_groups = cfg.n_heads // cfg.n_kv_heads  # how many Q heads per KV head
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
 
         # Projections
         self.q_proj = nn.Linear(cfg.d_model, cfg.n_heads * cfg.head_dim, bias=cfg.bias)
-        self.k_proj = nn.Linear(cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=cfg.bias)
-        self.v_proj = nn.Linear(cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=cfg.bias)
+        self.k_proj = nn.Linear(
+            cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=cfg.bias
+        )
+        self.v_proj = nn.Linear(
+            cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=cfg.bias
+        )
         self.o_proj = nn.Linear(cfg.n_heads * cfg.head_dim, cfg.d_model, bias=cfg.bias)
 
         self.attn_dropout = nn.Dropout(cfg.dropout)
         self.resid_dropout = nn.Dropout(cfg.dropout)
 
         # RoPE
-        self.rope = RotaryEmbedding(cfg.head_dim, base=cfg.rope_base, max_seq_len=cfg.context_length * 2)
+        self.rope = RotaryEmbedding(
+            cfg.head_dim, base=cfg.rope_base, max_seq_len=cfg.context_length * 2
+        )
 
     def forward(
         self,
@@ -202,9 +218,15 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.shape
 
         # Project
-        q = self.q_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)    # (B, n_h, T, hd)
-        k = self.k_proj(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2) # (B, n_kv, T, hd)
-        v = self.v_proj(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2) # (B, n_kv, T, hd)
+        q = (
+            self.q_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
+        )  # (B, n_h, T, hd)
+        k = (
+            self.k_proj(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        )  # (B, n_kv, T, hd)
+        v = (
+            self.v_proj(x).view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        )  # (B, n_kv, T, hd)
 
         # Apply RoPE
         cos, sin = self.rope(q, T)
@@ -218,7 +240,9 @@ class CausalSelfAttention(nn.Module):
         # Scaled dot-product attention (uses Flash Attention if PyTorch 2.0+)
         dropout_p = self.attn_dropout.p if self.training else 0.0
         y = F.scaled_dot_product_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             attn_mask=mask,
             dropout_p=dropout_p,
             is_causal=(mask is None),
@@ -233,6 +257,7 @@ class CausalSelfAttention(nn.Module):
 # 4. Feed-Forward (SwiGLU)
 # ============================================================
 
+
 class SwiGLUFFN(nn.Module):
     """
     SwiGLU Feed-Forward Network.
@@ -244,12 +269,14 @@ class SwiGLUFFN(nn.Module):
     to keep parameter count comparable.
     """
 
-    def __init__(self, d_model: int, d_ff: int, bias: bool = False, dropout: float = 0.0):
+    def __init__(
+        self, d_model: int, d_ff: int, bias: bool = False, dropout: float = 0.0
+    ):
         super().__init__()
         self.gate_proj = nn.Linear(d_model, d_ff, bias=bias)
-        self.up_proj   = nn.Linear(d_model, d_ff, bias=bias)
+        self.up_proj = nn.Linear(d_model, d_ff, bias=bias)
         self.down_proj = nn.Linear(d_ff, d_model, bias=bias)
-        self.dropout   = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.dropout(self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x)))
@@ -259,15 +286,16 @@ class SwiGLUFFN(nn.Module):
 # 5. Transformer block
 # ============================================================
 
+
 class TransformerBlock(nn.Module):
     """A single decoder-only Transformer block (pre-norm)."""
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.norm1 = RMSNorm(cfg.d_model, eps=cfg.norm_eps)
-        self.attn  = CausalSelfAttention(cfg)
+        self.attn = CausalSelfAttention(cfg)
         self.norm2 = RMSNorm(cfg.d_model, eps=cfg.norm_eps)
-        self.ffn   = SwiGLUFFN(cfg.d_model, cfg.d_ff, bias=cfg.bias, dropout=cfg.dropout)
+        self.ffn = SwiGLUFFN(cfg.d_model, cfg.d_ff, bias=cfg.bias, dropout=cfg.dropout)
 
     def forward(
         self,
@@ -282,6 +310,7 @@ class TransformerBlock(nn.Module):
 # ============================================================
 # 6. Full GPT model
 # ============================================================
+
 
 class GPTModel(nn.Module):
     """
@@ -301,11 +330,13 @@ class GPTModel(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.tok_emb  = nn.Embedding(cfg.vocab_size, cfg.d_model)
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.d_model)
         self.drop_emb = nn.Dropout(cfg.dropout)
-        self.blocks   = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
+        self.blocks = nn.ModuleList(
+            [TransformerBlock(cfg) for _ in range(cfg.n_layers)]
+        )
         self.norm_out = RMSNorm(cfg.d_model, eps=cfg.norm_eps)
-        self.lm_head  = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
+        self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
 
         # Weight tying
         if cfg.tie_embeddings:
@@ -354,17 +385,17 @@ class GPTModel(nn.Module):
             (logits, loss) where loss is None if labels is None.
         """
         B, T = input_ids.shape
-        assert T <= self.cfg.context_length, (
-            f"Sequence length {T} exceeds model context length {self.cfg.context_length}"
-        )
+        assert (
+            T <= self.cfg.context_length
+        ), f"Sequence length {T} exceeds model context length {self.cfg.context_length}"
 
         x = self.drop_emb(self.tok_emb(input_ids))  # (B, T, d_model)
 
         for block in self.blocks:
             x = block(x, mask=mask)
 
-        x = self.norm_out(x)               # (B, T, d_model)
-        logits = self.lm_head(x)           # (B, T, vocab_size)
+        x = self.norm_out(x)  # (B, T, d_model)
+        logits = self.lm_head(x)  # (B, T, vocab_size)
 
         loss = None
         if labels is not None:
@@ -406,8 +437,11 @@ class GPTModel(nn.Module):
         self.eval()
         for _ in range(max_new_tokens):
             # Crop to context window
-            ctx = input_ids if input_ids.size(1) <= self.cfg.context_length \
-                else input_ids[:, -self.cfg.context_length:]
+            ctx = (
+                input_ids
+                if input_ids.size(1) <= self.cfg.context_length
+                else input_ids[:, -self.cfg.context_length :]
+            )
 
             logits, _ = self.forward(ctx)
             logits = logits[:, -1, :]  # (1, vocab_size) — last token prediction
@@ -430,9 +464,13 @@ class GPTModel(nn.Module):
             # Top-p (nucleus) filtering
             if top_p is not None and 0.0 < top_p < 1.0:
                 sorted_logits, sorted_idx = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                cumulative_probs = torch.cumsum(
+                    F.softmax(sorted_logits, dim=-1), dim=-1
+                )
                 # Remove tokens with cumulative prob above threshold
-                sorted_indices_to_remove = cumulative_probs - F.softmax(sorted_logits, dim=-1) > top_p
+                sorted_indices_to_remove = (
+                    cumulative_probs - F.softmax(sorted_logits, dim=-1) > top_p
+                )
                 sorted_logits[sorted_indices_to_remove] = float("-inf")
                 logits = torch.scatter(logits, 1, sorted_idx, sorted_logits)
 
@@ -452,7 +490,8 @@ class GPTModel(nn.Module):
     def num_parameters(self, only_trainable: bool = True) -> int:
         """Count model parameters."""
         return sum(
-            p.numel() for p in self.parameters()
+            p.numel()
+            for p in self.parameters()
             if not only_trainable or p.requires_grad
         )
 
@@ -481,7 +520,7 @@ class GPTModel(nn.Module):
                 no_decay_params.append(param)
 
         optim_groups = [
-            {"params": decay_params,    "weight_decay": weight_decay},
+            {"params": decay_params, "weight_decay": weight_decay},
             {"params": no_decay_params, "weight_decay": 0.0},
         ]
 
@@ -497,6 +536,7 @@ class GPTModel(nn.Module):
 # ============================================================
 # 7. Factory function
 # ============================================================
+
 
 def build_model(cfg: object, vocab_size: Optional[int] = None) -> GPTModel:
     """

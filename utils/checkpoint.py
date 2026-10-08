@@ -65,7 +65,9 @@ class CheckpointManager:
                 if saved_loss is not None:
                     self._best_val_loss = float(saved_loss)
             except (OSError, ValueError, TypeError):
-                logger.warning("Ignoring invalid best checkpoint metadata: %s", best_meta)
+                logger.warning(
+                    "Ignoring invalid best checkpoint metadata: %s", best_meta
+                )
 
     # ------------------------------------------------------------------ #
     #  Saving                                                              #
@@ -110,7 +112,9 @@ class CheckpointManager:
             # The final evaluation can save the same step again. Retain the
             # previous complete checkpoint until its replacement is published.
             if ckpt_dir.exists():
-                backup = Path(tempfile.mkdtemp(prefix=".checkpoint-backup-", dir=self.output_dir))
+                backup = Path(
+                    tempfile.mkdtemp(prefix=".checkpoint-backup-", dir=self.output_dir)
+                )
                 backup.rmdir()
                 os.replace(ckpt_dir, backup)
             os.replace(stage, ckpt_dir)
@@ -151,7 +155,9 @@ class CheckpointManager:
         with open(best_meta_stage, "w") as f:
             json.dump(meta, f, indent=2)
         os.replace(best_meta_stage, self.output_dir / "best_meta.json")
-        logger.info(f"New best checkpoint at step {meta['step']} (val_loss={meta['val_loss']:.4f})")
+        logger.info(
+            f"New best checkpoint at step {meta['step']} (val_loss={meta['val_loss']:.4f})"
+        )
 
     def save_best(self, step: int, model: torch.nn.Module, val_loss: float) -> bool:
         """Save the exact weights just evaluated, without an optimizer checkpoint."""
@@ -221,7 +227,11 @@ class CheckpointManager:
             parent = ckpt_path.parent
             opt_file = parent / "optimizer.pt"
             sched_file = parent / "scheduler.pt"
-            meta_file = parent / "best_meta.json" if ckpt_path.name == "best.pt" else parent / "meta.json"
+            meta_file = (
+                parent / "best_meta.json"
+                if ckpt_path.name == "best.pt"
+                else parent / "meta.json"
+            )
 
         if device is None:
             device = next(model.parameters()).device
@@ -238,12 +248,16 @@ class CheckpointManager:
 
         # Optimizer
         if optimizer is not None and opt_file.exists():
-            optimizer.load_state_dict(torch.load(opt_file, map_location=device, weights_only=True))
+            optimizer.load_state_dict(
+                torch.load(opt_file, map_location=device, weights_only=True)
+            )
             logger.info("Restored optimizer state.")
 
         # Scheduler
         if scheduler is not None and sched_file.exists():
-            scheduler.load_state_dict(torch.load(sched_file, map_location=device, weights_only=True))
+            scheduler.load_state_dict(
+                torch.load(sched_file, map_location=device, weights_only=True)
+            )
             logger.info("Restored scheduler state.")
 
         # Meta
@@ -261,13 +275,16 @@ class CheckpointManager:
     def _scan_existing(self) -> List[Path]:
         """Find and sort existing checkpoint directories."""
         ckpts = sorted(
-            [d for d in self.output_dir.iterdir()
-             if d.is_dir()
-             and d.name.startswith("checkpoint-step-")
-             and d.name.removeprefix("checkpoint-step-").isdigit()
-             and (d / "meta.json").is_file()
-             and (d / "model.pt").is_file()
-             and (not self.save_optimizer or (d / "optimizer.pt").is_file())],
+            [
+                d
+                for d in self.output_dir.iterdir()
+                if d.is_dir()
+                and d.name.startswith("checkpoint-step-")
+                and d.name.removeprefix("checkpoint-step-").isdigit()
+                and (d / "meta.json").is_file()
+                and (d / "model.pt").is_file()
+                and (not self.save_optimizer or (d / "optimizer.pt").is_file())
+            ],
             key=lambda p: int(p.name.split("-")[-1]),
         )
         return ckpts
@@ -291,6 +308,7 @@ class CheckpointManager:
 # ------------------------------------------------------------------ #
 #  Helpers                                                             #
 # ------------------------------------------------------------------ #
+
 
 def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
     """Unwrap DDP / DataParallel wrappers."""

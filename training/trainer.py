@@ -85,7 +85,9 @@ class Trainer:
 
         # ---- Mixed precision scaler (FP16 only — BF16 doesn't need it) ----
         self.use_amp = dtype in (torch.float16, torch.bfloat16)
-        self.scaler = torch.amp.GradScaler(device.type, enabled=(dtype == torch.float16))
+        self.scaler = torch.amp.GradScaler(
+            device.type, enabled=(dtype == torch.float16)
+        )
 
         # ---- Checkpoint manager ----
         self.checkpoint_manager = CheckpointManager(
@@ -109,7 +111,11 @@ class Trainer:
         self.best_val_loss: float = self.checkpoint_manager.best_val_loss
         self._train_iter: Optional[Iterator] = None
         self._mps_profile_active = False
-        self.coverage_sampler = train_loader.sampler if isinstance(train_loader.sampler, CoverageSampler) else None
+        self.coverage_sampler = (
+            train_loader.sampler
+            if isinstance(train_loader.sampler, CoverageSampler)
+            else None
+        )
         self.completed_step = 0
         self.safe_to_checkpoint = False
 
@@ -173,7 +179,10 @@ class Trainer:
             if (step + 1) % self.tcfg.log_every_n_steps == 0:
                 # One host read per logging interval also waits for queued MPS
                 # work, so the elapsed time measures completed GPU work.
-                avg_loss = torch.stack(logged_losses).sum().item() / self.tcfg.log_every_n_steps
+                avg_loss = (
+                    torch.stack(logged_losses).sum().item()
+                    / self.tcfg.log_every_n_steps
+                )
                 dt = time.perf_counter() - t0
                 tokens_per_sec = (
                     self.tcfg.batch_size
@@ -221,14 +230,19 @@ class Trainer:
                     )
 
             # ---- Sample generation ----
-            if self.tcfg.generate_every_n_steps > 0 and (step + 1) % self.tcfg.generate_every_n_steps == 0:
+            if (
+                self.tcfg.generate_every_n_steps > 0
+                and (step + 1) % self.tcfg.generate_every_n_steps == 0
+            ):
                 self._synchronize_device()
                 generation_start = time.perf_counter()
                 self._log_sample_generation(step)
                 self._synchronize_device()
                 generation_seconds = time.perf_counter() - generation_start
                 self.model.train()
-                self.metrics_logger.log({"perf/generation_seconds": generation_seconds}, step=step)
+                self.metrics_logger.log(
+                    {"perf/generation_seconds": generation_seconds}, step=step
+                )
 
             # ---- Checkpoint ----
             if (step + 1) % self.tcfg.save_every_n_steps == 0:
@@ -240,14 +254,19 @@ class Trainer:
                     optimizer=self.optimizer,
                     val_loss=step_val_loss,
                     extra_meta={
-                        "train_loss": avg_loss if (step + 1) % self.tcfg.log_every_n_steps == 0 else None,
+                        "train_loss": (
+                            avg_loss
+                            if (step + 1) % self.tcfg.log_every_n_steps == 0
+                            else None
+                        ),
                         "lr": lr,
                         **self._sampler_checkpoint_meta(),
                     },
                 )
                 self._synchronize_device()
                 self.metrics_logger.log(
-                    {"perf/checkpoint_seconds": time.perf_counter() - checkpoint_start}, step=step
+                    {"perf/checkpoint_seconds": time.perf_counter() - checkpoint_start},
+                    step=step,
                 )
 
             if self._mps_profile_active and step - start_step + 1 >= profile_steps:
@@ -256,7 +275,9 @@ class Trainer:
         # ---- Final eval + checkpoint ----
         self.stop_mps_profile()
         logger.info("Training complete.  Running final evaluation …")
-        val_loss = last_eval_loss if last_eval_step == self.tcfg.max_steps else self.evaluate()
+        val_loss = (
+            last_eval_loss if last_eval_step == self.tcfg.max_steps else self.evaluate()
+        )
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
             self.checkpoint_manager.save_best(
@@ -270,7 +291,9 @@ class Trainer:
             extra_meta={"final": True, **self._sampler_checkpoint_meta()},
         )
         self.metrics_logger.close()
-        logger.info(f"Final val_loss={val_loss:.4f}  perplexity={math.exp(min(val_loss,20)):.2f}")
+        logger.info(
+            f"Final val_loss={val_loss:.4f}  perplexity={math.exp(min(val_loss,20)):.2f}"
+        )
 
     def _synchronize_device(self) -> None:
         if self.device.type == "mps":
@@ -284,7 +307,11 @@ class Trainer:
             logger.info("MPS profiling stopped")
 
     def _sampler_checkpoint_meta(self) -> dict:
-        return {"train_sampler": self.coverage_sampler.state_dict()} if self.coverage_sampler else {}
+        return (
+            {"train_sampler": self.coverage_sampler.state_dict()}
+            if self.coverage_sampler
+            else {}
+        )
 
     def _coverage_metrics(self) -> dict:
         if self.coverage_sampler is None:
@@ -299,7 +326,9 @@ class Trainer:
     def save_emergency_checkpoint(self) -> bool:
         """Save only if the model and data cursor are at a completed update."""
         if not self.safe_to_checkpoint:
-            logger.warning("Interrupted during an update; resume from the last complete checkpoint")
+            logger.warning(
+                "Interrupted during an update; resume from the last complete checkpoint"
+            )
             return False
         self.checkpoint_manager.save(
             step=self.completed_step,
@@ -368,8 +397,12 @@ class Trainer:
                     top_p=0.95,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
-                generated = self.tokenizer.decode(gen_ids[0].tolist(), skip_special_tokens=True)
-                logger.info(f"\n[step {step}] SAMPLE ─────────────\n{generated}\n─────────────────────\n")
+                generated = self.tokenizer.decode(
+                    gen_ids[0].tolist(), skip_special_tokens=True
+                )
+                logger.info(
+                    f"\n[step {step}] SAMPLE ─────────────\n{generated}\n─────────────────────\n"
+                )
             except Exception as exc:
                 logger.warning(f"Sample generation failed: {exc}")
 
@@ -445,9 +478,14 @@ class Trainer:
                     )
                 else:
                     self.coverage_sampler.load_state_dict(sampler_state)
-                    logger.info("Restored training data position: %s", self.coverage_sampler.progress())
+                    logger.info(
+                        "Restored training data position: %s",
+                        self.coverage_sampler.progress(),
+                    )
             elif meta.get("train_sampler") is not None:
-                raise ValueError("Tracked checkpoint requires its verified train.bin and completion manifest")
+                raise ValueError(
+                    "Tracked checkpoint requires its verified train.bin and completion manifest"
+                )
             self.completed_step = start_step
             self.safe_to_checkpoint = True
             logger.info(f"Resumed from step {start_step}")

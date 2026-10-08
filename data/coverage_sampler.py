@@ -108,7 +108,9 @@ class CoverageSampler(Sampler[int]):
 
     def state_dict(self) -> dict:
         if self.issued_position != self.committed_position:
-            raise RuntimeError("Cannot checkpoint while a training update is in progress")
+            raise RuntimeError(
+                "Cannot checkpoint while a training update is in progress"
+            )
         epoch, offset = divmod(self.committed_position, self.n_blocks)
         self._order_for_epoch(epoch)
         return {
@@ -134,13 +136,19 @@ class CoverageSampler(Sampler[int]):
             or not isinstance(position, int)
             or position < 0
         ):
-            raise ValueError("Checkpoint sampler state does not match this training binary/configuration")
+            raise ValueError(
+                "Checkpoint sampler state does not match this training binary/configuration"
+            )
         epoch, offset = divmod(position, self.n_blocks)
         if state.get("epoch") != epoch or state.get("block_offset") != offset:
-            raise ValueError("Checkpoint sampler epoch and block offset are inconsistent")
+            raise ValueError(
+                "Checkpoint sampler epoch and block offset are inconsistent"
+            )
         self._order_for_epoch(epoch)
         if state.get("shuffle_sha256") != self._cached_sha256:
-            raise ValueError("Checkpoint shuffle order identity does not match the saved order")
+            raise ValueError(
+                "Checkpoint shuffle order identity does not match the saved order"
+            )
         self.committed_position = position
         self.issued_position = position
 
@@ -152,7 +160,9 @@ class CoverageSampler(Sampler[int]):
         meta_path = self.order_dir / f"{base}.json"
         if not path.exists() or not meta_path.exists():
             values = np.arange(self.n_blocks, dtype=np.uint32)
-            np.random.default_rng(np.random.SeedSequence([self.seed, epoch])).shuffle(values)
+            np.random.default_rng(np.random.SeedSequence([self.seed, epoch])).shuffle(
+                values
+            )
             checksum = hashlib.sha256(memoryview(values)).hexdigest()
             fd, name = tempfile.mkstemp(prefix=".order-stage-", dir=self.order_dir)
             try:
@@ -164,13 +174,16 @@ class CoverageSampler(Sampler[int]):
             finally:
                 if os.path.exists(name):
                     os.unlink(name)
-            _write_json_atomic(meta_path, {
-                "binary_identity": self.binary_identity,
-                "seed": self.seed,
-                "epoch": epoch,
-                "n_blocks": self.n_blocks,
-                "sha256": checksum,
-            })
+            _write_json_atomic(
+                meta_path,
+                {
+                    "binary_identity": self.binary_identity,
+                    "seed": self.seed,
+                    "epoch": epoch,
+                    "n_blocks": self.n_blocks,
+                    "sha256": checksum,
+                },
+            )
         meta = json.loads(meta_path.read_text())
         if (
             meta.get("binary_identity") != self.binary_identity

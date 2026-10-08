@@ -30,6 +30,7 @@ try:
         TimeRemainingColumn,
     )
     from rich.table import Table
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -100,6 +101,7 @@ def get_logger(name: str) -> logging.Logger:
 #  ProgressBar                                                         #
 # ------------------------------------------------------------------ #
 
+
 class ProgressBar:
     """
     Thin wrapper around ``rich.progress.Progress`` (falls back to tqdm).
@@ -153,6 +155,7 @@ class ProgressBar:
 #  MetricsLogger                                                       #
 # ------------------------------------------------------------------ #
 
+
 class MetricsLogger:
     """
     Aggregates scalar metrics and flushes to WandB / TensorBoard / file.
@@ -184,6 +187,7 @@ class MetricsLogger:
         if use_tensorboard and log_dir:
             try:
                 from torch.utils.tensorboard import SummaryWriter
+
                 self._tb_writer = SummaryWriter(log_dir=str(Path(log_dir) / run_name))
             except ImportError:
                 self._logger.warning("TensorBoard not available; skipping.")
@@ -191,6 +195,7 @@ class MetricsLogger:
         if use_wandb:
             try:
                 import wandb
+
                 wandb.init(
                     project=wandb_project or "research-llm",
                     entity=wandb_entity,
@@ -205,9 +210,11 @@ class MetricsLogger:
         """Log a dict of metrics at a given step."""
         # Console
         parts = "  ".join(
-            f"{k}={v:.3e}" if k.endswith("/lr") and isinstance(v, float)
-            else f"{k}={v:.4f}" if isinstance(v, float)
-            else f"{k}={v}"
+            (
+                f"{k}={v:.3e}"
+                if k.endswith("/lr") and isinstance(v, float)
+                else f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+            )
             for k, v in metrics.items()
         )
         self._logger.info(f"[step {step}] {parts}")

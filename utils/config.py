@@ -91,6 +91,7 @@ class Config:
 
 # ---- Loading ----
 
+
 def load_config(path: Union[str, Path]) -> Config:
     """Load a YAML config file and return a Config object."""
     path = Path(path)
@@ -134,7 +135,9 @@ def apply_overrides(cfg: Config, overrides: List[str]) -> Config:
     data = cfg.to_dict()
     for override in overrides:
         if "=" not in override:
-            raise ValueError(f"Override must be in 'key=value' format, got: '{override}'")
+            raise ValueError(
+                f"Override must be in 'key=value' format, got: '{override}'"
+            )
         key_path, raw_value = override.split("=", 1)
         keys = key_path.strip().split(".")
         value = _parse_value(raw_value.strip())
@@ -170,11 +173,15 @@ def _set_nested(data: dict, keys: List[str], value: Any) -> None:
 # ---- Preset model sizes ----
 
 MODEL_PRESETS: Dict[str, Dict[str, Any]] = {
-    "nano": dict(n_layers=4,  n_heads=4,  d_model=256,  d_ff=1024,  context_length=512),
-    "small": dict(n_layers=12, n_heads=12, d_model=768,  d_ff=3072,  context_length=1024),
-    "medium": dict(n_layers=24, n_heads=16, d_model=1024, d_ff=4096,  context_length=2048),
-    "large": dict(n_layers=36, n_heads=20, d_model=1280, d_ff=5120,  context_length=2048),
-    "xl":    dict(n_layers=48, n_heads=25, d_model=1600, d_ff=6400,  context_length=2048),
+    "nano": dict(n_layers=4, n_heads=4, d_model=256, d_ff=1024, context_length=512),
+    "small": dict(n_layers=12, n_heads=12, d_model=768, d_ff=3072, context_length=1024),
+    "medium": dict(
+        n_layers=24, n_heads=16, d_model=1024, d_ff=4096, context_length=2048
+    ),
+    "large": dict(
+        n_layers=36, n_heads=20, d_model=1280, d_ff=5120, context_length=2048
+    ),
+    "xl": dict(n_layers=48, n_heads=25, d_model=1600, d_ff=6400, context_length=2048),
 }
 
 
