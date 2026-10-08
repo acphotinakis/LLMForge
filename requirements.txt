@@ -51,7 +51,7 @@ Pygments==2.21.0
 python-dateutil==2.9.0.post0
 pytokens==0.4.1
 PyYAML==6.0.3
-regex==2026.9.10
+regex==2026.9.29
 requests==2.34.2
 rich==15.0.0
 safetensors==0.8.0
