@@ -79,3 +79,5 @@ config/local.yaml
 llm-output/
 
 archive/
+
+a.txt
