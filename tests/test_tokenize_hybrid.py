@@ -89,7 +89,10 @@ class HybridTokenizationTest(unittest.TestCase):
                         "eos_token_id": 2,
                     },
                     "model": {"context_length": 8},
-                    "training": {"batch_size": 2},
+                    "training": {
+                        "batch_size": 2,
+                        "output_dir": str(root / "checkpoints"),
+                    },
                 }
             )
             baseline = root / "baseline"

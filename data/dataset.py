@@ -304,12 +304,17 @@ def build_dataloaders(
             raise ValueError("Exact coverage requires data.num_workers=0; worker prefetch can outrun committed updates")
         train_ds = MemoryMappedDataset(train_bin, context_length)
         val_ds = MemoryMappedDataset(val_bin, context_length)
+        output_dir = (
+            cfg.training.get("output_dir", "./checkpoints")
+            if hasattr(cfg, "training") and hasattr(cfg.training, "get")
+            else getattr(getattr(cfg, "training", None), "output_dir", "./checkpoints")
+        ) or "./checkpoints"
         train_sampler = CoverageSampler(
             bin_path=train_bin,
             manifest_path=parquet_dir / "tokenized_manifest.json",
             n_blocks=len(train_ds),
             context_length=context_length,
-            order_dir=Path(cfg.training.output_dir) / "shuffle_orders",
+            order_dir=Path(output_dir) / "shuffle_orders",
             seed=cfg.data.shuffle_seed,
         )
         train_loader = DataLoader(
