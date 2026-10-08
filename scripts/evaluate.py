@@ -32,33 +32,64 @@ logger = get_logger(__name__)
 
 
 def evaluate_on_file(generator: TextGenerator, text_path: str) -> float:
-    """Compute perplexity on every paragraph of a text file."""
+    """Compute token-weighted cross-entropy over a text file."""
+    import torch.nn.functional as F
+
     text = Path(text_path).read_text(encoding="utf-8")
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    total_loss = 0.0
-    count = 0
+
+    total_nll = 0.0
+    total_tokens = 0
+
+    generator.model.eval()
+
     for para in tqdm(paragraphs, desc="Evaluating"):
-        try:
-            ids = generator.tokenizer.encode(para, add_bos=True)
-            if len(ids) < 4:
+        ids = generator.tokenizer.encode(para, add_bos=True)
+
+        if len(ids) < 2:
+            continue
+
+        # Stay within the model's supported context window.
+        # Independent chunks are scored without prior-chunk context.
+        context = generator.model.cfg.context_length
+
+        for start in range(0, len(ids) - 1, context):
+            chunk = ids[start : start + context + 1]
+
+            if len(chunk) < 2:
                 continue
-            x = torch.tensor([ids[:-1]], dtype=torch.long, device=generator.device)
-            y = torch.tensor([ids[1:]],  dtype=torch.long, device=generator.device)
-            import torch.nn.functional as F
-            with torch.no_grad(), torch.autocast(
+
+            x = torch.tensor(
+                [chunk[:-1]],
+                dtype=torch.long,
+                device=generator.device,
+            )
+            y = torch.tensor(
+                [chunk[1:]],
+                dtype=torch.long,
+                device=generator.device,
+            )
+
+            with torch.inference_mode(), torch.autocast(
                 device_type=generator.device.type,
                 dtype=generator.dtype,
                 enabled=generator.use_amp,
             ):
                 logits, _ = generator.model(x)
-                loss = F.cross_entropy(
-                    logits.view(-1, logits.size(-1)), y.view(-1)
+
+                nll = F.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    y.reshape(-1),
+                    reduction="sum",
                 )
-            total_loss += loss.item()
-            count += 1
-        except Exception as exc:
-            logger.warning(f"Skipping paragraph: {exc}")
-    return total_loss / max(count, 1)
+
+            total_nll += nll.item()
+            total_tokens += y.numel()
+
+    if total_tokens == 0:
+        raise ValueError("No tokens available for evaluation")
+
+    return total_nll / total_tokens
 
 
 def main():
@@ -76,6 +107,7 @@ def main():
         cfg = apply_overrides(cfg, args.overrides)
 
     from model.transformer import ModelConfig
+
     model_cfg = ModelConfig.from_config(cfg)
     model_cfg.vocab_size = cfg.tokenizer.vocab_size
 
@@ -91,7 +123,9 @@ def main():
     if args.text:
         avg_loss = evaluate_on_file(generator, args.text)
     else:
-        logger.info("No --text provided; running a quick self-test with sample sentences.")
+        logger.info(
+            "No --text provided; running a quick self-test with sample sentences."
+        )
         sample = (
             "Transformer architectures have revolutionised natural language processing. "
             "The attention mechanism allows models to relate tokens across long distances. "
